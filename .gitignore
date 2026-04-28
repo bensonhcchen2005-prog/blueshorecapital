@@ -43,3 +43,7 @@ data_cache/
 # OS
 .DS_Store
 Thumbs.db
+
+# Vendored binaries — install via brew/curl on each machine
+bin/cloudflared
+bin/ngrok
