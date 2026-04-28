@@ -18,6 +18,14 @@ orders.json
 *.sqlite
 *.db
 
+# Investor / fund-private docs — keep out of public repo
+INVESTOR_REVIEW.md
+FUND_BOOK.md
+CORE_SLEEVE_REVISION.md
+PIT_HYBRID_REVISION_v2.md
+Moomoo_Hybrid_Trading_System.pdf
+OPTION_PLAYBOOK.pdf
+
 # Python
 __pycache__/
 *.py[cod]
