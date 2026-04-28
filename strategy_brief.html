@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moomoo Trading System — Strategy Brief</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:24px;max-width:1100px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px;color:#fff}
+.subtitle{font-size:12px;color:#8b949e;margin-bottom:20px}
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:20px}
+.kpi{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;text-align:center}
+.kpi-label{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.kpi-value{font-size:20px;font-weight:700;color:#fff}
+.kpi-value.green{color:#3fb950}
+.kpi-value.red{color:#f85149}
+.kpi-value.blue{color:#58a6ff}
+.section{margin-bottom:16px}
+.section-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:8px;border-bottom:1px solid #30363d;padding-bottom:4px}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px}
+th{background:#161b22;color:#8b949e;font-weight:600;text-align:left;padding:6px 8px;border-bottom:2px solid #30363d;font-size:10px;text-transform:uppercase;letter-spacing:.3px}
+td{padding:6px 8px;border-bottom:1px solid #21262d}
+tr:hover{background:rgba(88,166,255,.04)}
+.strat-name{font-weight:600;color:#fff}
+.badge{font-size:9px;padding:2px 6px;border-radius:4px;font-weight:600;margin-left:4px}
+.badge-long{background:rgba(63,185,80,.15);color:#3fb950}
+.badge-short{background:rgba(248,81,73,.15);color:#f85149}
+.badge-best{background:rgba(88,166,255,.15);color:#58a6ff}
+.badge-worst{background:rgba(248,81,73,.1);color:#f85149}
+.green{color:#3fb950}
+.red{color:#f85149}
+.dim{color:#8b949e}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px}
+.card-title{font-size:12px;font-weight:600;color:#fff;margin-bottom:6px}
+.desc{font-size:11px;color:#8b949e;line-height:1.5}
+.entry-exit{font-size:11px;margin-top:6px}
+.entry-exit span{display:inline-block;background:#1c2333;padding:2px 6px;border-radius:3px;margin:1px 0;font-family:'SF Mono',Consolas,monospace;font-size:10px}
+.footer{font-size:10px;color:#484f58;text-align:center;margin-top:16px;border-top:1px solid #21262d;padding-top:8px}
+.alloc-bar{height:16px;border-radius:4px;overflow:hidden;display:flex;margin:8px 0}
+.alloc-bar div{height:100%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600}
+@media print{body{background:#fff;color:#333}th{background:#f0f0f0;color:#333}td{border-color:#ddd}.kpi{border-color:#ddd;background:#f8f8f8}.card{background:#f8f8f8;border-color:#ddd}.kpi-value,.strat-name,.card-title,.section-title,h1{color:#111}.green{color:#16a34a}.red{color:#dc2626}.badge-long{background:#dcfce7;color:#16a34a}.badge-short{background:#fef2f2;color:#dc2626}}
+</style>
+</head>
+<body>
+
+<h1>Moomoo Trading System — Strategy Brief</h1>
+<div class="subtitle">Paper Trading | As of April 12, 2026 | Account: $1,137,043 | 7 strategies across US + HK markets</div>
+
+<!-- KPI Row -->
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Total P&L</div><div class="kpi-value green">+$8,051</div></div>
+  <div class="kpi"><div class="kpi-label">Win Rate</div><div class="kpi-value">58.6%</div></div>
+  <div class="kpi"><div class="kpi-label">Profit Factor</div><div class="kpi-value blue">2.32</div></div>
+  <div class="kpi"><div class="kpi-label">Trades</div><div class="kpi-value">29</div></div>
+  <div class="kpi"><div class="kpi-label">Max DD</div><div class="kpi-value red">$3,803</div></div>
+  <div class="kpi"><div class="kpi-label">Exposure</div><div class="kpi-value">25.9%</div></div>
+</div>
+
+<!-- Strategy Performance Table -->
+<div class="section">
+  <div class="section-title">Strategy Performance</div>
+  <table>
+    <thead>
+      <tr><th>Strategy</th><th>Direction</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&L</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="strat-name">MA Crossover <span class="badge badge-best">TOP</span></td><td><span class="badge badge-long">LONG</span></td><td>5</td><td>4</td><td class="green">80.0%</td><td class="green">+$7,136</td><td class="green">Active</td></tr>
+      <tr><td class="strat-name">Momentum</td><td><span class="badge badge-long">LONG</span></td><td>13</td><td>9</td><td class="green">69.2%</td><td class="green">+$4,253</td><td class="green">Active</td></tr>
+      <tr><td class="strat-name">Short Momentum</td><td><span class="badge badge-short">SHORT</span></td><td>4</td><td>3</td><td class="green">75.0%</td><td class="green">+$199</td><td class="green">Active (US only)</td></tr>
+      <tr><td class="strat-name">Gap Reversal</td><td><span class="badge badge-long">LONG</span></td><td>0</td><td>-</td><td class="dim">-</td><td class="dim">$0</td><td class="dim">Standby</td></tr>
+      <tr><td class="strat-name">Breakout</td><td><span class="badge badge-long">LONG</span></td><td>0</td><td>-</td><td class="dim">-</td><td class="dim">$0</td><td class="dim">Standby</td></tr>
+      <tr><td class="strat-name">RSI Divergence <span class="badge badge-worst">REVIEW</span></td><td><span class="badge badge-long">LONG</span></td><td>5</td><td>1</td><td class="red">20.0%</td><td class="red">-$540</td><td class="red">Underperforming</td></tr>
+      <tr><td class="strat-name">Mean Reversion <span class="badge badge-worst">REVIEW</span></td><td><span class="badge badge-long">LONG</span></td><td>2</td><td>0</td><td class="red">0.0%</td><td class="red">-$2,972</td><td class="red">Underperforming</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Strategy Details -->
+<div class="section">
+  <div class="section-title">Strategy Breakdown</div>
+  <div class="two-col">
+
+    <div class="card">
+      <div class="card-title">MA Crossover <span class="badge badge-long">LONG</span></div>
+      <div class="desc">Trend-following. Enters when SMA(20) crosses above SMA(50) with RSI > 50 and adequate volume. Captures sustained momentum shifts after moving average alignment.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>SMA20 > SMA50 cross</span> <span>RSI > 50</span> <span>RVOL > 0.8</span></div>
+        <div>Exit: <span>Stop: SMA50 - 0.5x ATR</span> <span>Target: +2.5x ATR</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Momentum <span class="badge badge-long">LONG</span></div>
+      <div class="desc">Trend continuation. Enters on strong rate-of-change (>3%) with positive and accelerating MACD, price above SMA50, RSI 40-75. Rides established uptrends with wide stops.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>ROC > 3%</span> <span>MACD accel</span> <span>Price > SMA50</span> <span>RSI 40-75</span></div>
+        <div>Exit: <span>Stop: -2x ATR</span> <span>Target: +3x ATR</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Short Momentum <span class="badge badge-short">SHORT</span></div>
+      <div class="desc">Downtrend capture. Shorts when price is below SMA20, 20-day momentum < -5, RSI weakening but not yet oversold (25-55). US markets only. Counter-balances long book.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>Price < SMA20</span> <span>Mom20 < -5</span> <span>RSI 25-55</span></div>
+        <div>Exit: <span>Stop: SMA20 + ATR</span> <span>Target: -2.5x ATR</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Mean Reversion <span class="badge badge-long">LONG</span></div>
+      <div class="desc">Counter-trend. Buys oversold bounces at Bollinger Band lower bound with RSI < 32 confirmation. Targets mean (BB midline). Currently underperforming — catching falling knives in trending markets.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>RSI < 32</span> <span>Price near BB lower</span> <span>RVOL > 0.8</span></div>
+        <div>Exit: <span>Stop: -2.5x ATR</span> <span>Target: BB midline (SMA20)</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Breakout <span class="badge badge-long">LONG</span></div>
+      <div class="desc">Momentum burst. Enters when price breaks 20-bar high with elevated volume (1.3x+) and trend confirmation (price > SMA50). Anti-chase filter prevents late entries.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>20-bar high break</span> <span>RVOL > 1.3</span> <span>Price > SMA50</span></div>
+        <div>Exit: <span>Stop: Breakout - 0.5x ATR</span> <span>Target: +2.5x ATR</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">RSI Divergence <span class="badge badge-long">LONG</span></div>
+      <div class="desc">Reversal detection. Spots bullish divergence: price makes lower low while RSI makes higher low. Catches bottoms before MAs react. High reward when correct; many false signals.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>RSI bullish divergence</span> <span>RSI < 50</span> <span>Price < SMA20</span></div>
+        <div>Exit: <span>Stop: Recent low - ATR</span> <span>Target: SMA20</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Gap Reversal <span class="badge badge-long">LONG</span></div>
+      <div class="desc">Intraday mean-reversion. Buys gap-down opens (>2%) that recover >50% within the same bar. Targets full gap fill. Rarely triggers on daily bars — designed for intraday.</div>
+      <div class="entry-exit">
+        <div>Entry: <span>Gap down > 2%</span> <span>Recovery > 50%</span> <span>Green candle</span></div>
+        <div>Exit: <span>Stop: Session low - 0.5x ATR</span> <span>Target: Prior close</span></div>
+      </div>
+    </div>
+
+    <div class="card" style="border-color:rgba(88,166,255,.3);">
+      <div class="card-title" style="color:#58a6ff;">Risk Management</div>
+      <div class="desc" style="font-size:11px;line-height:1.6;">
+        <strong>Position sizing:</strong> Max 8% of account or $80K per position<br>
+        <strong>Exposure cap:</strong> 150% gross, 120% net<br>
+        <strong>Daily loss halt:</strong> 2.5% of account<br>
+        <strong>Cooldown:</strong> 30 min after 3 consecutive losses<br>
+        <strong>Sector limit:</strong> Max 50% in one sector<br>
+        <strong>Scaling tiers:</strong> Auto-reduce sizing as account grows past $1.1M, $1.25M, $1.5M, $2M<br>
+        <strong>Regime gating:</strong> Bull/flat/bear detection via SPY vs SMA200 + VIX. Counter-trend strategies disabled in strong trends.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Universe & Allocation -->
+<div class="section">
+  <div class="section-title">Universe & Capital Allocation</div>
+  <div class="two-col">
+    <div>
+      <table>
+        <thead><tr><th colspan="2">Scan Universe (37 tickers)</th></tr></thead>
+        <tbody>
+          <tr><td class="dim" style="width:100px">US Stocks</td><td>NVDA, AAPL, MSFT, GOOGL, AMZN, META, TSLA, AMD, AVGO, CRM, JPM, GS, UNH, XOM, BA, PLTR, COIN, ARM, SMCI, MSTR</td></tr>
+          <tr><td class="dim">HK Stocks</td><td>Tencent, Alibaba, ZIJIN, HSBC, BAIDU, XPENG, LI AUTO, BABA-W, PDD</td></tr>
+          <tr><td class="dim">ETFs</td><td>SPY, QQQ, IWM, TLT, GLD, XLE, XLF, XLK</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <table>
+        <thead><tr><th colspan="2">Current Portfolio</th></tr></thead>
+        <tbody>
+          <tr><td class="dim">Account</td><td>$1,137,043 (paper)</td></tr>
+          <tr><td class="dim">Cash</td><td>$850,163 (74.8%)</td></tr>
+          <tr><td class="dim">Deployed</td><td>$286,881 (25.2%)</td></tr>
+          <tr><td class="dim">US Holdings</td><td>$280,396 (97.7%)</td></tr>
+          <tr><td class="dim">HK Holdings</td><td>$6,485 (2.3%)</td></tr>
+          <tr><td class="dim">Open Strat Pos</td><td>0 (markets closed)</td></tr>
+          <tr><td class="dim">Long Positions</td><td>4 (buy & hold / core)</td></tr>
+          <tr><td class="dim">Regime</td><td><span style="color:#3fb950;font-weight:600">BULL</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  Moomoo Trading System | Paper Trading Mode | Auto-refreshes every 120s | Dashboard: localhost:8877 | Generated April 12, 2026
+</div>
+
+</body>
+</html>

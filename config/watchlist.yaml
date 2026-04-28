@@ -1,0 +1,49 @@
+# Watchlist — tickers the system will monitor
+# Add/remove tickers here. Each entry can have strategy tags and filters.
+
+tickers:
+  - code: "US.AAPL"
+    name: "Apple"
+    sector: "Technology"
+    strategies: ["ma_crossover", "momentum", "mean_reversion"]
+
+  - code: "US.MSFT"
+    name: "Microsoft"
+    sector: "Technology"
+    strategies: ["ma_crossover", "momentum"]
+
+  - code: "US.GOOGL"
+    name: "Alphabet"
+    sector: "Technology"
+    strategies: ["ma_crossover", "momentum"]
+
+  - code: "US.AMZN"
+    name: "Amazon"
+    sector: "Consumer Cyclical"
+    strategies: ["ma_crossover", "breakout"]
+
+  - code: "US.NVDA"
+    name: "NVIDIA"
+    sector: "Technology"
+    strategies: ["momentum", "breakout"]
+
+  - code: "US.META"
+    name: "Meta Platforms"
+    sector: "Technology"
+    strategies: ["ma_crossover", "mean_reversion"]
+
+  - code: "US.SPY"
+    name: "S&P 500 ETF"
+    sector: "ETF"
+    strategies: ["ma_crossover", "momentum"]
+
+  - code: "US.QQQ"
+    name: "Nasdaq 100 ETF"
+    sector: "ETF"
+    strategies: ["ma_crossover", "momentum"]
+
+# Default settings for watchlist filtering
+defaults:
+  min_avg_volume: 500000
+  max_spread_pct: 0.005
+  timeframes: ["K_5M", "K_15M", "K_DAY"]

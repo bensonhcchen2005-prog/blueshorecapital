@@ -1,0 +1,45 @@
+# Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+conn_key.txt
+secrets.json
+credentials.json
+
+# Trading state / personal data — never commit
+auto_trades.csv
+broker_snapshot.json
+balance_history.json
+positions.json
+orders.json
+*.sqlite
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Logs
+logs/
+
+# Data cache
+data_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
