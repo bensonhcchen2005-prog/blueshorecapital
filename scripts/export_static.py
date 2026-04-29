@@ -172,11 +172,14 @@ const klass = n => n == null ? "neu" : (n>0?"pos":n<0?"neg":"neu");
 // KPIs
 const s = SNAPSHOT.stats || {};
 const sys = SNAPSHOT.system || {};
-const stage = SNAPSHOT.stage || {};
-const startEq = stage.starting_equity || 1000000;
-const curEq = stage.current_equity || sys.balance || startEq;
-const totalRet = (curEq - startEq) / startEq * 100;
+const balHistRaw = SNAPSHOT.balance_history || [];
+// Use the configured paper-account starting capital ($1M default), not stage.starting_equity
+// (stage.starting_equity is the Stage-1 risk envelope of $5K, not real starting capital).
+const PAPER_START = {{PAPER_START}};
+const curEq = sys.balance ?? (balHistRaw.length ? balHistRaw[balHistRaw.length-1].balance : PAPER_START);
+const totalRet = (curEq - PAPER_START) / PAPER_START * 100;
 const kpis = [
+  {label:"Portfolio value", value:"$"+fmt(curEq), klass:"neu"},
   {label:"Total return", value:pct(totalRet), klass:klass(totalRet)},
   {label:"Total P&L ($)", value:"$"+fmt(s.total_pnl), klass:klass(s.total_pnl)},
   {label:"Win rate", value:(s.win_rate||0).toFixed(1)+"%", klass:"neu"},
@@ -184,23 +187,51 @@ const kpis = [
   {label:"Trades closed", value:s.closed_trades||0, klass:"neu"},
   {label:"Open positions", value:s.open_trades||0, klass:"neu"},
   {label:"Max drawdown", value:"$"+fmt(s.max_drawdown), klass:"neg"},
-  {label:"Best trade", value:"$"+fmt(s.best_trade), klass:"pos"},
 ];
 document.getElementById("kpis").innerHTML = kpis.map(k =>
   `<div class="kpi"><div class="label">${k.label}</div><div class="value ${k.klass}">${k.value}</div></div>`
 ).join("");
 
-// Equity curve
-const balHist = SNAPSHOT.balance_history || [];
-const labels = balHist.map(p => (p.t||p.timestamp||"").slice(5,16));
+// Equity curve — downsample to ~300 evenly-spaced points so the line scales smoothly
+function downsample(arr, maxPts) {
+  if (arr.length <= maxPts) return arr;
+  const step = arr.length / maxPts;
+  const out = [];
+  for (let i = 0; i < maxPts; i++) out.push(arr[Math.floor(i * step)]);
+  out.push(arr[arr.length-1]);  // always include latest
+  return out;
+}
+const balHist = downsample(balHistRaw, 300);
+const labels = balHist.map(p => (p.t || p.timestamp || "").replace("T", " ").slice(0, 16));
 const values = balHist.map(p => p.balance ?? p.equity ?? 0);
 new Chart(document.getElementById("equityChart"), {
   type:"line",
   data:{labels, datasets:[{
+    label:"Portfolio value",
     data:values, borderColor:"#58a6ff", backgroundColor:"rgba(88,166,255,0.1)",
-    fill:true, tension:0.2, pointRadius:0, borderWidth:2
+    fill:true, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2
   }]},
-  options:{responsive:true, plugins:{legend:{display:false}},
+  options:{responsive:true, interaction:{mode:"index", intersect:false},
+    plugins:{
+      legend:{display:false},
+      tooltip:{
+        backgroundColor:"#161b22", borderColor:"#30363d", borderWidth:1,
+        titleColor:"#c9d1d9", bodyColor:"#c9d1d9", padding:10,
+        callbacks:{
+          title:(items)=>items[0].label,
+          label:(item)=>{
+            const v = item.parsed.y;
+            const pnl = v - PAPER_START;
+            const pct = (pnl / PAPER_START * 100).toFixed(2);
+            const sign = pnl >= 0 ? "+" : "";
+            return [
+              `Portfolio: $${v.toLocaleString(undefined,{maximumFractionDigits:0})}`,
+              `P&L: ${sign}$${pnl.toLocaleString(undefined,{maximumFractionDigits:0})} (${sign}${pct}%)`
+            ];
+          }
+        }
+      }
+    },
     scales:{x:{ticks:{color:"#8b949e",maxTicksLimit:8},grid:{color:"#30363d"}},
             y:{ticks:{color:"#8b949e",callback:v=>"$"+v.toLocaleString()},grid:{color:"#30363d"}}}}
 });
@@ -241,14 +272,17 @@ if (bn) {
 </html>"""
 
 
-def render(snapshot: dict, pipeline: dict, gh_repo: str = "your-username/moomoo-trader") -> str:
+def render(snapshot: dict, pipeline: dict,
+           gh_repo: str = "your-username/moomoo-trader",
+           paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return (HTML_TEMPLATE
             .replace("{{SNAPSHOT}}", json.dumps(snapshot, default=str))
             .replace("{{PIPELINE}}", json.dumps(pipeline, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
-            .replace("{{GH_REPO}}", gh_repo))
+            .replace("{{GH_REPO}}", gh_repo)
+            .replace("{{PAPER_START}}", str(int(paper_start))))
 
 
 def main() -> None:
@@ -258,6 +292,8 @@ def main() -> None:
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--gh-repo", default="your-username/moomoo-trader",
                     help="GitHub repo slug for the source link in footer")
+    ap.add_argument("--paper-start", type=float, default=1_000_000,
+                    help="Starting paper-account capital used for total-return calc")
     args = ap.parse_args()
 
     try:
@@ -269,7 +305,7 @@ def main() -> None:
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    html = render(snap, pipe, args.gh_repo)
+    html = render(snap, pipe, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
