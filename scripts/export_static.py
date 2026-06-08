@@ -149,6 +149,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <section>
+    <h2>Active investment theses</h2>
+    <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+      Every open position has a recorded thesis with technical signals + fundamentals + qualitative rationale.
+      Click a row to expand.
+    </div>
+    <div id="thesesList"></div>
+  </section>
+
+  <section>
     <h2>Signal funnel — last 7 days</h2>
     <div style="font-size:12px;color:var(--dim);margin-bottom:8px" id="funnelMeta"></div>
     <div class="funnel" id="funnel"></div>
@@ -164,6 +173,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script>
 const SNAPSHOT = {{SNAPSHOT}};
 const PIPELINE = {{PIPELINE}};
+const THESES   = {{THESES}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -249,6 +259,76 @@ const holdRows = (SNAPSHOT.holdings || []).slice(0,15)
              <td class="${klass(h.pnl_pct)}">${pct(h.pnl_pct)}</td></tr>`).join("");
 document.querySelector("#holdingsTable tbody").innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
 
+// Active Theses
+function renderTheses() {
+  const theses = (THESES && THESES.theses) || [];
+  if (!theses.length) {
+    document.getElementById("thesesList").innerHTML =
+      '<div style="color:var(--dim);font-style:italic;padding:12px">No active theses yet.</div>';
+    return;
+  }
+  theses.sort((a,b) => (b.unrealized_pnl||0) - (a.unrealized_pnl||0));
+  const html = theses.map(t => {
+    const q = t.quantitative || {};
+    const ql = t.qualitative || {};
+    const sideColor = t.side === "LONG" ? "var(--green)" : "var(--red)";
+    const pnlColor = (t.unrealized_pnl||0) >= 0 ? "var(--green)" : "var(--red)";
+    const pnl = t.unrealized_pnl || 0;
+    const target = t.target || {};
+    const tail = (t.tailwinds || []).join(", ") || "—";
+    return `
+      <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:8px;padding:0;overflow:hidden">
+        <summary style="cursor:pointer;padding:12px 14px;list-style:none;display:flex;align-items:center;gap:14px;background:var(--surface)">
+          <span style="font-weight:600;font-size:14px;min-width:90px">${t.code}</span>
+          <span style="color:${sideColor};font-weight:600;min-width:50px">${t.side}</span>
+          <span style="color:var(--dim);font-size:12px;min-width:90px">${t.sector || "—"}</span>
+          <span style="flex:1;color:var(--dim);font-size:12px">${(ql.thesis_summary||"").slice(0,80)}${(ql.thesis_summary||"").length>80?"…":""}</span>
+          <span style="color:${pnlColor};font-weight:600;min-width:90px;text-align:right">${pnl>=0?"+":""}$${Math.abs(pnl).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+          <span style="color:var(--dim);font-size:11px;min-width:70px;text-align:right">${(target.upside_pct!=null?(target.upside_pct>=0?"+":"")+target.upside_pct+"%":"—")} tgt</span>
+        </summary>
+        <div style="padding:16px;border-top:1px solid var(--border);background:rgba(0,0,0,0.2)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Thesis</div>
+              <div style="font-size:13px;margin-bottom:12px">${ql.thesis_summary||"—"}</div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Tailwinds</div>
+              <div style="font-size:12px;margin-bottom:10px">${ql.tailwinds_narrative||tail}</div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Moat</div>
+              <div style="font-size:12px;margin-bottom:10px">${(ql.moat||[]).join(" · ") || "—"}</div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">KPIs to watch</div>
+              <div style="font-size:12px;margin-bottom:10px">${(ql.kpis_to_watch||[]).join(" · ") || "—"}</div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Thesis breakers</div>
+              <div style="font-size:12px;color:var(--amber)">${(ql.thesis_break_conditions||[]).join(" · ") || "—"}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">Fundamentals</div>
+              <table style="width:100%;font-size:12px">
+                <tr><td style="color:var(--dim)">Market cap</td><td style="text-align:right">${q.market_cap?"$"+(q.market_cap/1e9).toFixed(0)+"B":"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Forward P/E</td><td style="text-align:right">${q.forward_pe?q.forward_pe.toFixed(1):"—"}</td></tr>
+                <tr><td style="color:var(--dim)">P/S</td><td style="text-align:right">${q.ps?q.ps.toFixed(1):"—"}</td></tr>
+                <tr><td style="color:var(--dim)">EV/EBITDA</td><td style="text-align:right">${q.ev_ebitda?q.ev_ebitda.toFixed(1):"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Revenue growth (YoY)</td><td style="text-align:right">${q.rev_growth!=null?(q.rev_growth*100).toFixed(1)+"%":"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Gross margin</td><td style="text-align:right">${q.gross_margin!=null?(q.gross_margin*100).toFixed(1)+"%":"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Operating margin</td><td style="text-align:right">${q.op_margin!=null?(q.op_margin*100).toFixed(1)+"%":"—"}</td></tr>
+                <tr><td style="color:var(--dim)">FCF margin</td><td style="text-align:right">${q.fcf_margin!=null?(q.fcf_margin*100).toFixed(1)+"%":"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Insider ownership</td><td style="text-align:right">${q.insider_ownership!=null?(q.insider_ownership*100).toFixed(1)+"%":"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Beta</td><td style="text-align:right">${q.beta!=null?q.beta.toFixed(2):"—"}</td></tr>
+                <tr><td style="color:var(--dim)">Quality score</td><td style="text-align:right"><b>${q.quality_score!=null?(q.quality_score*100).toFixed(0)+"/100":"—"}</b></td></tr>
+              </table>
+              <div style="margin-top:14px;font-size:11px;color:var(--dim);text-transform:uppercase">Position</div>
+              <div style="font-size:12px;margin-top:4px">
+                Entry $${(t.entry_price||0).toFixed(2)} → Target $${(target.price||0).toFixed(2)} (${(target.upside_pct!=null?(target.upside_pct>=0?"+":"")+target.upside_pct+"%":"—")})
+                · Horizon ${target.horizon_days||"?"}d
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>`;
+  }).join("");
+  document.getElementById("thesesList").innerHTML = html;
+}
+renderTheses();
+
 // Funnel
 const f = PIPELINE.funnel || {};
 const stages = ["originated","passed_score","passed_gate","queued","filled"];
@@ -272,13 +352,14 @@ if (bn) {
 </html>"""
 
 
-def render(snapshot: dict, pipeline: dict,
+def render(snapshot: dict, pipeline: dict, theses: dict,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return (HTML_TEMPLATE
             .replace("{{SNAPSHOT}}", json.dumps(snapshot, default=str))
             .replace("{{PIPELINE}}", json.dumps(pipeline, default=str))
+            .replace("{{THESES}}",   json.dumps(theses,   default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -299,13 +380,17 @@ def main() -> None:
     try:
         snap = fetch(f"{args.base}/api/data")
         pipe = fetch(f"{args.base}/api/pipeline?window={args.window}")
+        try:
+            theses = fetch(f"{args.base}/api/theses")
+        except Exception:
+            theses = {"theses": [], "count": 0}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    html = render(snap, pipe, args.gh_repo, args.paper_start)
+    html = render(snap, pipe, theses, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

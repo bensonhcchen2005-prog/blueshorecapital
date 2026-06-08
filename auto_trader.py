@@ -906,6 +906,30 @@ ALL_STRATEGIES = [
 
 # ── Trade Context Router ────────────────────────────────────────
 
+def get_broker_position_qty(trade_ctx, code: str) -> float:
+    """
+    Return the broker's current signed quantity for `code` (positive = long,
+    negative = short, 0 = no position). Returns float('nan') on lookup failure
+    so callers can decide whether to bail out or proceed.
+
+    This is the guard that prevents zombie shorts: when the bot tries to
+    close a long it no longer has, we must not send a naked SELL order
+    (Moomoo paper would treat it as a short sale of fresh shares).
+    """
+    try:
+        ret, positions = trade_ctx.position_list_query(trd_env=TrdEnv.SIMULATE)
+        if ret != RET_OK or positions is None:
+            return float('nan')
+        # positions is a DataFrame; find row for this code
+        row = positions[positions["code"] == code] if hasattr(positions, "loc") else None
+        if row is None or len(row) == 0:
+            return 0.0
+        return float(row["qty"].iloc[0])
+    except Exception as e:
+        logger.warning(f"Broker position lookup failed for {code}: {e}")
+        return float('nan')
+
+
 def get_trd_ctx_for_code(code: str, us_trd: OpenUSTradeContext, hk_trd: OpenSecTradeContext):
     """Return the correct trade context based on the ticker's market prefix."""
     if code.startswith("US."):
@@ -1088,6 +1112,31 @@ def flatten_market_positions(
 
         exit_side = TrdSide.SELL if direction == "LONG" else TrdSide.BUY
         trade_ctx = get_trd_ctx_for_code(code, us_trd, hk_trd)
+
+        # GUARD: verify broker actually holds the position before sending close.
+        # Prevents the "failed-close → fresh short" zombie bug.
+        broker_qty = get_broker_position_qty(trade_ctx, code)
+        if direction == "LONG" and broker_qty <= 0:
+            logger.warning(
+                f"[zombie-guard] {code} session-close: bot says LONG {qty} "
+                f"but broker has {broker_qty}. Marking CLOSED without order."
+            )
+            trade["status"] = "CLOSED"
+            trade["exit_time"] = datetime.now().isoformat()
+            trade["exit_price"] = current_price
+            continue
+        if direction == "SHORT" and broker_qty >= 0:
+            logger.warning(
+                f"[zombie-guard] {code} session-close: bot says SHORT {qty} "
+                f"but broker has {broker_qty}. Marking CLOSED without order."
+            )
+            trade["status"] = "CLOSED"
+            trade["exit_time"] = datetime.now().isoformat()
+            trade["exit_price"] = current_price
+            continue
+        # Cap qty to what broker actually holds (never sell/cover more)
+        if broker_qty == broker_qty:  # not NaN
+            qty = min(qty, int(abs(broker_qty)))
 
         time.sleep(2.5)
         ret, data = trade_ctx.place_order(
@@ -1364,6 +1413,33 @@ def check_exits(
             # Place exit order via correct market context
             exit_side = TrdSide.SELL if direction == "LONG" else TrdSide.BUY
             trade_ctx = get_trd_ctx_for_code(code, us_trd, hk_trd)
+
+            # GUARD: verify broker actually holds the position before sending close.
+            # Prevents the "failed-close → fresh short" zombie bug.
+            broker_qty = get_broker_position_qty(trade_ctx, code)
+            if direction == "LONG" and broker_qty <= 0:
+                logger.warning(
+                    f"[zombie-guard] {code} intraday-exit ({exit_reason}): "
+                    f"bot says LONG {qty} but broker has {broker_qty}. "
+                    f"Marking CLOSED without order."
+                )
+                trade["status"] = "CLOSED"
+                trade["exit_time"] = datetime.now().isoformat()
+                trade["exit_price"] = current_price
+                continue
+            if direction == "SHORT" and broker_qty >= 0:
+                logger.warning(
+                    f"[zombie-guard] {code} intraday-exit ({exit_reason}): "
+                    f"bot says SHORT {qty} but broker has {broker_qty}. "
+                    f"Marking CLOSED without order."
+                )
+                trade["status"] = "CLOSED"
+                trade["exit_time"] = datetime.now().isoformat()
+                trade["exit_price"] = current_price
+                continue
+            if broker_qty == broker_qty:  # not NaN
+                qty = min(qty, int(abs(broker_qty)))
+
             ret, data = trade_ctx.place_order(
                 price=0, qty=qty, code=code,
                 trd_side=exit_side,

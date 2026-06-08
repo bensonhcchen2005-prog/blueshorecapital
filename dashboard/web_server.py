@@ -577,6 +577,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_backtest_latest()
         elif self.path.startswith("/api/backtest"):
             self._serve_backtest()
+        elif self.path == "/api/theses":
+            self._serve_theses()
         elif self.path == "/api/sleeves":
             self._serve_sleeves()
         elif self.path.startswith("/api/pipeline/missed"):
@@ -731,61 +733,60 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         hk_value = 0.0
         us_value = 0.0
         holdings_pnl = 0.0
-        # If we have a broker snapshot, use it for hk/us split, holdings P&L,
-        # and deployed totals — these are authoritative. Long/short counts
-        # still come from the bot's CSV (broker doesn't tell us LONG vs SHORT
-        # without looking at qty signs).
+        # If we have a broker snapshot, prefer the broker's per-position list
+        # over Moomoo's `us.market_val` aggregate (which goes negative when
+        # shorts dominate, making the dashboard look like one giant short).
+        # We walk positions ourselves and split long/short by qty sign.
         broker_used = bool(broker.get("positions") is not None)
         if broker_used:
-            hk_value = float(broker.get("hk", {}).get("market_val_usd", 0) or 0)
-            us_value = float(broker.get("us", {}).get("market_val", 0) or 0)
             holdings_pnl = float(broker.get("holdings_pnl", 0) or 0)
-        # Walk the bot's CSV positions for L/S split & per-position notional
-        # used for the long/short allocation bar. When a broker snapshot is
-        # available, we still need this loop for L/S sides — but we don't let
-        # it overwrite the broker-authoritative hk_value/us_value/holdings_pnl.
-        for t in detailed:
-            if t.get("status") != "OPEN":
-                continue
-            try:
-                code = t.get("code", "")
-                qty = int(t.get("qty") or 0)
-                px = t.get("current_price") or t.get("entry_price") or 0
-                px = float(px)
-                notional = abs(qty * px)
-                if code.startswith("HK."):
-                    notional /= HKD_PER_USD
-                    if not broker_used:
+            for p in broker.get("positions", []):
+                try:
+                    q = float(p.get("qty") or 0)
+                    mv = abs(float(p.get("market_val_usd") or 0))  # absolute notional
+                    if q == 0 or mv == 0:
+                        continue
+                    if (p.get("market") or "").upper() == "HK":
+                        hk_value += mv
+                    else:
+                        us_value += mv
+                    if q > 0:
+                        deployed_long += mv
+                        long_count += 1
+                    else:
+                        deployed_short += mv
+                        short_count += 1
+                except (TypeError, ValueError):
+                    continue
+        else:
+            # No broker snapshot — fall back to bot's CSV (no shorts expected here).
+            for t in detailed:
+                if t.get("status") != "OPEN":
+                    continue
+                try:
+                    code = t.get("code", "")
+                    qty = int(t.get("qty") or 0)
+                    px = t.get("current_price") or t.get("entry_price") or 0
+                    px = float(px)
+                    notional = abs(qty * px)
+                    if code.startswith("HK."):
+                        notional /= HKD_PER_USD
                         hk_value += notional
-                else:
-                    if not broker_used:
+                    else:
                         us_value += notional
-                side = (t.get("side") or "").upper()
-                if side == "LONG":
-                    deployed_long += notional
-                    long_count += 1
-                else:
-                    deployed_short += notional
-                    short_count += 1
-                if not broker_used:
+                    side = (t.get("side") or "").upper()
+                    if side == "LONG":
+                        deployed_long += notional
+                        long_count += 1
+                    else:
+                        deployed_short += notional
+                        short_count += 1
                     upnl = t.get("unrealized_pnl")
                     if upnl is not None:
                         holdings_pnl += float(upnl)
-            except Exception:
-                continue
-        # When using broker snapshot, deployed_total reflects broker market value
-        if broker_used:
-            deployed_total = round(hk_value + us_value, 2)
-            # Reapportion long/short based on bot's CSV ratio when totals diverge,
-            # so the allocation bar still adds up to broker market value.
-            csv_total = deployed_long + deployed_short
-            if csv_total > 0:
-                long_share = deployed_long / csv_total
-                short_share = deployed_short / csv_total
-                deployed_long = round(deployed_total * long_share, 2)
-                deployed_short = round(deployed_total * short_share, 2)
-        else:
-            deployed_total = deployed_long + deployed_short
+                except Exception:
+                    continue
+        deployed_total = round(deployed_long + deployed_short, 2)
         gross_exposure = deployed_total
         # 现金 = broker cash from snapshot (preferred), else derived from balance
         if broker_used:
@@ -955,21 +956,24 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if len(exit_dates) == len(stats.get("cumulative_dates", [])):
                 stats["cumulative_dates"] = exit_dates
 
-        # Per-position holdings for pie charts (broker-authoritative)
+        # Per-position holdings for pie charts (broker-authoritative).
+        # Includes BOTH long (qty>0) and short (qty<0) positions, with side
+        # marked explicitly so the UI can render them correctly.
         holdings = []
         for p in (broker.get("positions") or []):
             try:
                 qty = float(p.get("qty") or 0)
                 mv_usd = float(p.get("market_val_usd") or 0)
-                if qty <= 0 or mv_usd <= 0:
-                    continue
+                if qty == 0:
+                    continue  # only skip flat positions
                 holdings.append({
                     "code": p.get("code"),
                     "name": p.get("stock_name") or p.get("code"),
                     "market": p.get("market"),
                     "qty": qty,
-                    "market_val_usd": round(mv_usd, 2),
-                    "market_val_local": round(float(p.get("market_val_local") or mv_usd), 2),
+                    "side": "SHORT" if qty < 0 else "LONG",
+                    "market_val_usd": round(abs(mv_usd), 2),  # absolute notional
+                    "market_val_local": round(abs(float(p.get("market_val_local") or mv_usd)), 2),
                     "pl_val_usd": round(float(p.get("pl_val_usd") or 0), 2),
                     "pl_ratio_pct": round(float(p.get("pl_ratio_pct") or 0), 2),
                 })
@@ -1475,6 +1479,31 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(payload, default=str).encode())
+
+    def _serve_theses(self):
+        """Return active trade theses (signals + fundamentals + qualitative)."""
+        try:
+            from data.trade_thesis import get_active_theses
+            theses = get_active_theses()
+            # Enrich with current price + live P&L from broker snapshot
+            broker = read_broker_snapshot()
+            price_by_code = {p["code"]: float(p.get("market_val_usd",0))/abs(float(p.get("qty") or 1))
+                             for p in (broker.get("positions") or []) if p.get("qty")}
+            pnl_by_code = {p["code"]: float(p.get("pl_val_usd",0))
+                           for p in (broker.get("positions") or [])}
+            for code, t in theses.items():
+                t["current_price"] = round(price_by_code.get(code, 0), 2) or None
+                t["unrealized_pnl"] = round(pnl_by_code.get(code, 0), 2)
+                if t.get("current_price") and t.get("entry_price"):
+                    raw_chg = (t["current_price"]/t["entry_price"] - 1) * 100
+                    t["price_change_pct"] = round(raw_chg if t["side"] == "LONG" else -raw_chg, 2)
+            self._send_json({
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "count": len(theses),
+                "theses": list(theses.values()),
+            })
+        except Exception as e:
+            self._send_json({"error": str(e), "theses": [], "count": 0})
 
     def _serve_static_html(self, filename: str):
         """Serve a static HTML file from the project root."""
