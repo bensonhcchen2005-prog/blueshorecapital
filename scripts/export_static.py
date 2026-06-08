@@ -145,10 +145,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     This page is for transparency only — not investment advice.
   </div>
 
-  <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px">
+  <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
     <button data-tab="overview" class="tab-btn active">Overview</button>
     <button data-tab="theses"   class="tab-btn">Active Theses</button>
     <button data-tab="details"  class="tab-btn">Trade Details</button>
+    <button data-tab="alerts"   class="tab-btn">Alerts &amp; Macro</button>
     <button data-tab="funnel"   class="tab-btn">Signal Funnel</button>
   </div>
 
@@ -200,6 +201,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </section>
   </div>
 
+  <div id="tab-alerts" class="tab-panel" style="display:none">
+    <section>
+      <h2>Macro context</h2>
+      <div id="macroBox" style="font-size:13px;color:var(--dim)">Loading…</div>
+    </section>
+
+    <section>
+      <h2>Thesis monitor</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Automated checks on every active position: revenue growth decay, margin compression,
+        valuation rerate, stop proximity, earnings imminence, thesis-breaker conditions.
+      </div>
+      <div id="alertsSummary" style="display:flex;gap:8px;margin-bottom:14px"></div>
+      <div id="alertsList"></div>
+    </section>
+  </div>
+
   <div id="tab-funnel" class="tab-panel" style="display:none">
     <section>
       <h2>Signal funnel — last 7 days</h2>
@@ -219,6 +237,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 const SNAPSHOT = {{SNAPSHOT}};
 const PIPELINE = {{PIPELINE}};
 const THESES   = {{THESES}};
+const ALERTS   = {{ALERTS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -303,6 +322,82 @@ const holdRows = (SNAPSHOT.holdings || []).slice(0,15)
              <td>$${fmt(h.entry||h.cost_price)}</td>
              <td class="${klass(h.pnl_pct)}">${pct(h.pnl_pct)}</td></tr>`).join("");
 document.querySelector("#holdingsTable tbody").innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
+
+// Alerts + Macro
+function renderAlerts() {
+  const a = ALERTS || {};
+  const macro = a.macro || {};
+  const counts = a.counts || {RED:0,ORANGE:0,YELLOW:0,GREEN:0};
+
+  // Macro box
+  const tier1Today = macro.tier1_today || [];
+  const upcoming = (macro.upcoming_14d || []).slice(0,8);
+  const nextT1 = macro.next_tier1_event;
+  let macroHtml = '';
+  if (tier1Today.length) {
+    macroHtml += `<div style="background:rgba(248,81,73,0.1);border:1px solid var(--red);color:var(--red);padding:10px 14px;border-radius:6px;margin-bottom:12px">
+      <b>⚠ Today: Tier-1 macro event</b><br>
+      ${tier1Today.map(e=>`<div style="margin-top:4px">• ${e.event} — ${e.impact}</div>`).join('')}
+    </div>`;
+  } else {
+    macroHtml += '<div style="color:var(--green);margin-bottom:12px">No Tier-1 macro events today.</div>';
+  }
+  if (nextT1) {
+    macroHtml += `<div style="margin-bottom:8px"><b>Next Tier-1 catalyst:</b> ${nextT1.date} — ${nextT1.event}</div>`;
+  }
+  if (upcoming.length) {
+    macroHtml += '<div style="font-size:11px;color:var(--dim);margin-top:8px">Upcoming 14 days:</div>';
+    macroHtml += '<table style="width:100%;font-size:12px;margin-top:6px">';
+    upcoming.forEach(e => {
+      const color = e.tier===1?'var(--red)':e.tier===2?'var(--amber)':'var(--dim)';
+      macroHtml += `<tr><td style="padding:3px 0;color:${color};width:90px">${e.date}</td><td style="color:${color};width:60px">T${e.tier}</td><td>${e.event}</td></tr>`;
+    });
+    macroHtml += '</table>';
+  }
+  document.getElementById('macroBox').innerHTML = macroHtml;
+
+  // Counts summary
+  const sev = (label, n, color) => `<div style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px;flex:1;min-width:100px">
+    <div style="font-size:11px;color:var(--dim);text-transform:uppercase">${label}</div>
+    <div style="font-size:22px;font-weight:600;color:${color}">${n}</div>
+  </div>`;
+  document.getElementById('alertsSummary').innerHTML =
+    sev('Red', counts.RED, 'var(--red)') +
+    sev('Orange', counts.ORANGE, 'var(--amber)') +
+    sev('Yellow', counts.YELLOW, '#d29922') +
+    sev('Green', counts.GREEN, 'var(--green)');
+
+  // Alert cards (skip GREEN)
+  const alerts = (a.alerts || []).filter(x => x.severity !== 'GREEN')
+    .sort((x,y) => ({RED:0,ORANGE:1,YELLOW:2}[x.severity] - {RED:0,ORANGE:1,YELLOW:2}[y.severity]));
+  if (!alerts.length) {
+    document.getElementById('alertsList').innerHTML =
+      '<div style="color:var(--green);padding:14px;background:rgba(63,185,80,0.08);border:1px solid var(--green);border-radius:6px">✓ All theses healthy — no deterioration flagged.</div>';
+    return;
+  }
+  const sevColor = {RED:'var(--red)', ORANGE:'var(--amber)', YELLOW:'#d29922'};
+  document.getElementById('alertsList').innerHTML = alerts.map(al => `
+    <div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid ${sevColor[al.severity]};border-radius:6px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div>
+          <span style="font-weight:600;font-size:15px">${al.code}</span>
+          <span style="color:var(--dim);margin-left:8px;font-size:12px">${al.side} · ${al.sector}</span>
+        </div>
+        <div>
+          <span style="color:${sevColor[al.severity]};font-weight:600">${al.severity}</span>
+          <span style="color:var(--dim);font-size:11px;margin-left:8px">score ${al.deterioration_score}/100</span>
+        </div>
+      </div>
+      <div style="font-size:12px">
+        ${(al.rules_triggered || []).map(r => `
+          <div style="padding:4px 0;display:flex;gap:10px">
+            <span style="color:${sevColor[r.severity]||'var(--dim)'};min-width:80px;font-weight:600;text-transform:uppercase;font-size:10px">${r.rule}</span>
+            <span>${r.detail}</span>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+renderAlerts();
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -538,7 +633,7 @@ if (bn) {
 </html>"""
 
 
-def render(snapshot: dict, pipeline: dict, theses: dict,
+def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -546,6 +641,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict,
             .replace("{{SNAPSHOT}}", json.dumps(snapshot, default=str))
             .replace("{{PIPELINE}}", json.dumps(pipeline, default=str))
             .replace("{{THESES}}",   json.dumps(theses,   default=str))
+            .replace("{{ALERTS}}",   json.dumps(alerts,   default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -570,13 +666,17 @@ def main() -> None:
             theses = fetch(f"{args.base}/api/theses")
         except Exception:
             theses = {"theses": [], "count": 0}
+        try:
+            alerts = fetch(f"{args.base}/api/alerts")
+        except Exception:
+            alerts = {"alerts": [], "macro": {}, "counts": {}}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    html = render(snap, pipe, theses, args.gh_repo, args.paper_start)
+    html = render(snap, pipe, theses, alerts, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -579,6 +579,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_backtest()
         elif self.path == "/api/theses":
             self._serve_theses()
+        elif self.path == "/api/alerts":
+            self._serve_alerts()
         elif self.path == "/api/sleeves":
             self._serve_sleeves()
         elif self.path.startswith("/api/pipeline/missed"):
@@ -1504,6 +1506,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             self._send_json({"error": str(e), "theses": [], "count": 0})
+
+    def _serve_alerts(self):
+        """Return latest thesis-monitor alerts + macro snapshot."""
+        try:
+            from pathlib import Path
+            p = Path(__file__).parent.parent / "logs" / "thesis_alerts_latest.json"
+            if p.exists():
+                self._send_json(json.loads(p.read_text()))
+            else:
+                self._send_json({"alerts": [], "macro": {}, "counts": {}})
+        except Exception as e:
+            self._send_json({"error": str(e), "alerts": [], "macro": {}})
 
     def _serve_static_html(self, filename: str):
         """Serve a static HTML file from the project root."""
