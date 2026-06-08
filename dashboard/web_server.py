@@ -79,7 +79,7 @@ def compute_stats(trades: List[Dict]) -> Dict:
             "max_drawdown": 0,
         }
 
-    pnls = [float(t.get("pnl", 0)) for t in closed]
+    pnls = [float(t.get("pnl") or 0) for t in closed]
     # Extract close dates for each trade (for the equity curve x-axis).
     # Prefer exit_time (from auto_trades.csv) over timestamp (entry time).
     close_dates = []
@@ -136,7 +136,7 @@ def get_strategy_breakdown(trades: List[Dict]) -> List[Dict]:
         name = t.get("strategy", "unknown")
         if name not in strategies:
             strategies[name] = {"name": name, "trades": 0, "wins": 0, "pnl": 0.0}
-        pnl = float(t.get("pnl", 0))
+        pnl = float(t.get("pnl") or 0)
         strategies[name]["trades"] += 1
         strategies[name]["pnl"] += pnl
         if pnl > 0:
@@ -161,7 +161,7 @@ def get_daily_pnl(trades: List[Dict]) -> List[Dict]:
         day = ts[:10] if len(ts) >= 10 else "unknown"
         if day not in daily:
             daily[day] = {"date": day, "pnl": 0.0, "trades": 0}
-        daily[day]["pnl"] += float(t.get("pnl", 0))
+        daily[day]["pnl"] += float(t.get("pnl") or 0)
         daily[day]["trades"] += 1
 
     result = []

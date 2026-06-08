@@ -103,6 +103,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   footer a{color:var(--blue);text-decoration:none}
   .disclaimer{background:rgba(210,153,34,0.08);border:1px solid var(--amber);
               color:var(--amber);padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:16px}
+  .tab-btn{background:transparent;border:none;color:var(--dim);cursor:pointer;
+           padding:10px 16px;font-size:13px;border-bottom:2px solid transparent;
+           font-family:inherit;transition:all 0.15s}
+  .tab-btn:hover{color:var(--text)}
+  .tab-btn.active{color:var(--text);border-bottom-color:var(--blue);font-weight:600}
+  .trade-card{background:var(--surface);border:1px solid var(--border);
+              border-radius:8px;padding:18px;margin-bottom:14px}
+  .trade-card-header{display:flex;justify-content:space-between;align-items:center;
+                     margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+  .trade-meta-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;font-size:12px;margin-bottom:14px}
+  .trade-meta-cell{}
+  .trade-meta-cell .lbl{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+  .trade-meta-cell .val{font-weight:600;font-size:14px}
+  .trade-section{margin-top:14px}
+  .trade-section h4{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:0 0 6px 0}
+  .signal-pill{display:inline-block;background:rgba(88,166,255,0.1);color:var(--blue);
+               padding:3px 9px;border-radius:12px;font-size:11px;margin-right:6px;margin-bottom:4px}
+  .risk-pill{display:inline-block;background:rgba(248,81,73,0.1);color:var(--red);
+             padding:3px 9px;border-radius:12px;font-size:11px;margin-right:6px;margin-bottom:4px}
+  .kpi-pill{display:inline-block;background:rgba(63,185,80,0.1);color:var(--green);
+            padding:3px 9px;border-radius:12px;font-size:11px;margin-right:6px;margin-bottom:4px}
+  @media(max-width:720px){.trade-meta-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -123,6 +145,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     This page is for transparency only — not investment advice.
   </div>
 
+  <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px">
+    <button data-tab="overview" class="tab-btn active">Overview</button>
+    <button data-tab="theses"   class="tab-btn">Active Theses</button>
+    <button data-tab="details"  class="tab-btn">Trade Details</button>
+    <button data-tab="funnel"   class="tab-btn">Signal Funnel</button>
+  </div>
+
+  <div id="tab-overview" class="tab-panel">
   <div class="grid kpis" id="kpis"></div>
 
   <section>
@@ -147,22 +177,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </table>
     </section>
   </div>
+  </div><!-- /tab-overview -->
 
-  <section>
-    <h2>Active investment theses</h2>
-    <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
-      Every open position has a recorded thesis with technical signals + fundamentals + qualitative rationale.
-      Click a row to expand.
-    </div>
-    <div id="thesesList"></div>
-  </section>
+  <div id="tab-theses" class="tab-panel" style="display:none">
+    <section>
+      <h2>Active investment theses</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Every open position has a recorded thesis with technical signals + fundamentals + qualitative rationale.
+        Click a row to expand.
+      </div>
+      <div id="thesesList"></div>
+    </section>
+  </div>
 
-  <section>
-    <h2>Signal funnel — last 7 days</h2>
-    <div style="font-size:12px;color:var(--dim);margin-bottom:8px" id="funnelMeta"></div>
-    <div class="funnel" id="funnel"></div>
-    <div style="display:flex;gap:8px;margin-top:8px" id="funnelLabels"></div>
-  </section>
+  <div id="tab-details" class="tab-panel" style="display:none">
+    <section>
+      <h2>Per-trade details</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Full record of every position: entry signals, fundamentals at entry, target, stop, real-time P&amp;L, KPIs to monitor, thesis breakers.
+      </div>
+      <div id="tradeDetailsList"></div>
+    </section>
+  </div>
+
+  <div id="tab-funnel" class="tab-panel" style="display:none">
+    <section>
+      <h2>Signal funnel — last 7 days</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:8px" id="funnelMeta"></div>
+      <div class="funnel" id="funnel"></div>
+      <div style="display:flex;gap:8px;margin-top:8px" id="funnelLabels"></div>
+    </section>
+  </div>
 </main>
 
 <footer>
@@ -258,6 +303,147 @@ const holdRows = (SNAPSHOT.holdings || []).slice(0,15)
              <td>$${fmt(h.entry||h.cost_price)}</td>
              <td class="${klass(h.pnl_pct)}">${pct(h.pnl_pct)}</td></tr>`).join("");
 document.querySelector("#holdingsTable tbody").innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.getElementById('tab-' + btn.dataset.tab).style.display = 'block';
+  });
+});
+
+// Per-trade detail cards
+function renderTradeDetails() {
+  const theses = (THESES && THESES.theses) || [];
+  if (!theses.length) {
+    document.getElementById('tradeDetailsList').innerHTML =
+      '<div style="color:var(--dim);font-style:italic;padding:12px">No active trades yet.</div>';
+    return;
+  }
+  theses.sort((a,b) => (b.unrealized_pnl||0) - (a.unrealized_pnl||0));
+  const html = theses.map(t => {
+    const q = t.quantitative || {};
+    const ql = t.qualitative || {};
+    const target = t.target || {};
+    const invalid = t.invalidation || {};
+    const sideColor = t.side === 'LONG' ? 'var(--green)' : 'var(--red)';
+    const pnl = t.unrealized_pnl || 0;
+    const pnlColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const pctChg = t.price_change_pct;
+    const signals = t.signals || [];
+    const opened = (t.opened_at||'').slice(0,16).replace('T',' ');
+    const notional = (t.entry_price || 0) * (t.qty || 0);
+
+    return `
+      <div class="trade-card">
+        <div class="trade-card-header">
+          <div>
+            <div style="font-size:18px;font-weight:600">${t.code}
+              <span style="color:${sideColor};font-size:13px;margin-left:8px">${t.side}</span>
+              <span style="color:var(--dim);font-size:12px;margin-left:8px">${t.sector}</span>
+            </div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px">Opened ${opened} UTC</div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:${pnlColor};font-size:18px;font-weight:600">
+              ${pnl>=0?'+':''}$${Math.abs(pnl).toLocaleString(undefined,{maximumFractionDigits:0})}
+              ${pctChg!=null?'<span style="font-size:13px;margin-left:4px">('+(pctChg>=0?'+':'')+pctChg.toFixed(1)+'%)</span>':''}
+            </div>
+            <div style="font-size:11px;color:var(--dim)">Unrealized P&amp;L</div>
+          </div>
+        </div>
+
+        <div class="trade-meta-grid">
+          <div class="trade-meta-cell">
+            <div class="lbl">Quantity</div>
+            <div class="val">${(t.qty||0).toLocaleString()}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Entry price</div>
+            <div class="val">$${(t.entry_price||0).toFixed(2)}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Current</div>
+            <div class="val">${t.current_price?'$'+t.current_price.toFixed(2):'—'}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Notional</div>
+            <div class="val">$${notional.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Target</div>
+            <div class="val" style="color:var(--green)">$${(target.price||0).toFixed(2)}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Upside</div>
+            <div class="val" style="color:var(--green)">${target.upside_pct!=null?(target.upside_pct>=0?'+':'')+target.upside_pct+'%':'—'}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Stop loss</div>
+            <div class="val" style="color:var(--red)">${invalid.stop_price?'$'+invalid.stop_price.toFixed(2):'—'}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Horizon</div>
+            <div class="val">${target.horizon_days||'—'} days</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+          <div>
+            <div class="trade-section">
+              <h4>Investment thesis</h4>
+              <div style="font-size:13px;line-height:1.55">${ql.thesis_summary || '—'}</div>
+            </div>
+            <div class="trade-section">
+              <h4>Entry signals</h4>
+              <div>${signals.map(s => `<span class="signal-pill" title="${s.detail||''}">${s.name}</span>`).join('') || '<span style="color:var(--dim)">—</span>'}</div>
+              ${signals.length ? '<div style="font-size:11px;color:var(--dim);margin-top:6px">' + signals.map(s=>'• '+s.detail).join('<br>') + '</div>' : ''}
+            </div>
+            <div class="trade-section">
+              <h4>Tailwinds</h4>
+              <div style="font-size:12px;line-height:1.5">${ql.tailwinds_narrative || '—'}</div>
+            </div>
+            <div class="trade-section">
+              <h4>Moat</h4>
+              <div style="font-size:12px">${(ql.moat||[]).join(' · ') || '—'}</div>
+            </div>
+          </div>
+          <div>
+            <div class="trade-section">
+              <h4>Fundamentals at entry</h4>
+              <table style="width:100%;font-size:12px">
+                <tr><td style="color:var(--dim)">Market cap</td><td style="text-align:right">${q.market_cap?'$'+(q.market_cap/1e9).toFixed(0)+'B':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Forward P/E</td><td style="text-align:right">${q.forward_pe?q.forward_pe.toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">P/S</td><td style="text-align:right">${q.ps?q.ps.toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">EV / EBITDA</td><td style="text-align:right">${q.ev_ebitda?q.ev_ebitda.toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Revenue growth (YoY)</td><td style="text-align:right">${q.rev_growth!=null?(q.rev_growth*100).toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Gross margin</td><td style="text-align:right">${q.gross_margin!=null?(q.gross_margin*100).toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Operating margin</td><td style="text-align:right">${q.op_margin!=null?(q.op_margin*100).toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">FCF margin</td><td style="text-align:right">${q.fcf_margin!=null?(q.fcf_margin*100).toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">ROE</td><td style="text-align:right">${q.roe!=null?(q.roe*100).toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Insider ownership</td><td style="text-align:right">${q.insider_ownership!=null?(q.insider_ownership*100).toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Beta</td><td style="text-align:right">${q.beta!=null?q.beta.toFixed(2):'—'}</td></tr>
+                <tr><td style="color:var(--dim);font-weight:600">Quality score</td><td style="text-align:right;font-weight:600;color:var(--blue)">${q.quality_score!=null?(q.quality_score*100).toFixed(0)+'/100':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Analyst tgt</td><td style="text-align:right">${q.analyst_price_target?'$'+q.analyst_price_target.toFixed(2):'—'}</td></tr>
+              </table>
+            </div>
+            <div class="trade-section">
+              <h4>KPIs to monitor</h4>
+              <div>${(ql.kpis_to_watch||[]).map(k => `<span class="kpi-pill">${k}</span>`).join('') || '<span style="color:var(--dim)">—</span>'}</div>
+            </div>
+            <div class="trade-section">
+              <h4>Thesis-breaker risks</h4>
+              <div>${(ql.thesis_break_conditions||[]).map(k => `<span class="risk-pill">${k}</span>`).join('') || '<span style="color:var(--dim)">—</span>'}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  document.getElementById('tradeDetailsList').innerHTML = html;
+}
+renderTradeDetails();
 
 // Active Theses
 function renderTheses() {
