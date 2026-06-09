@@ -155,7 +155,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <div id="tab-overview" class="tab-panel">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:14px;align-items:center;gap:10px">
+    <span style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Market</span>
+    <select id="marketFilter" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 12px;font-size:13px;cursor:pointer">
+      <option value="ALL">All markets (US + HK)</option>
+      <option value="US">US only</option>
+      <option value="HK">HK only</option>
+    </select>
+  </div>
+
   <div class="grid kpis" id="kpis"></div>
+  <div id="marketBreakdown" style="margin-bottom:20px"></div>
 
   <section>
     <h2>Equity curve</h2>
@@ -268,28 +278,126 @@ const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(und
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
 const klass = n => n == null ? "neu" : (n>0?"pos":n<0?"neg":"neu");
 
-// KPIs
+// KPIs — recomputed per market filter
 const s = SNAPSHOT.stats || {};
 const sys = SNAPSHOT.system || {};
 const balHistRaw = SNAPSHOT.balance_history || [];
-// Use the configured paper-account starting capital ($1M default), not stage.starting_equity
-// (stage.starting_equity is the Stage-1 risk envelope of $5K, not real starting capital).
+const portfolios = SNAPSHOT.portfolios || {};
 const PAPER_START = {{PAPER_START}};
-const curEq = sys.balance ?? (balHistRaw.length ? balHistRaw[balHistRaw.length-1].balance : PAPER_START);
-const totalRet = (curEq - PAPER_START) / PAPER_START * 100;
-const kpis = [
-  {label:"Portfolio value", value:"$"+fmt(curEq), klass:"neu"},
-  {label:"Total return", value:pct(totalRet), klass:klass(totalRet)},
-  {label:"Total P&L ($)", value:"$"+fmt(s.total_pnl), klass:klass(s.total_pnl)},
-  {label:"Win rate", value:(s.win_rate||0).toFixed(1)+"%", klass:"neu"},
-  {label:"Profit factor", value:fmt(s.profit_factor), klass:klass((s.profit_factor||1)-1)},
-  {label:"Trades closed", value:s.closed_trades||0, klass:"neu"},
-  {label:"Open positions", value:s.open_trades||0, klass:"neu"},
-  {label:"Max drawdown", value:"$"+fmt(s.max_drawdown), klass:"neg"},
-];
-document.getElementById("kpis").innerHTML = kpis.map(k =>
-  `<div class="kpi"><div class="label">${k.label}</div><div class="value ${k.klass}">${k.value}</div></div>`
-).join("");
+
+function renderKPIs(market) {
+  const us = portfolios.US || {};
+  const hk = portfolios.HK || {};
+  const hkInUSD = hk.total_assets_usd || (hk.total_assets / (hk.fx_hkd_per_usd || 7.78));
+  const fx = hk.fx_hkd_per_usd || 7.78;
+
+  let curEq, totalRet, totalPnl, openCount, closedCount, winRate, pf, dd, label, ccy = '$';
+
+  if (market === 'US') {
+    curEq = us.total_assets;
+    totalRet = us.total_return;  // dollars
+    totalPnl = us.total_pnl;
+    openCount = us.broker_open_positions ?? us.open_trades ?? 0;
+    closedCount = us.closed_trades || 0;
+    winRate = us.win_rate_pct || 0;
+    pf = s.profit_factor;
+    dd = s.max_drawdown;
+    label = 'US Portfolio (USD)';
+  } else if (market === 'HK') {
+    curEq = hk.total_assets;  // in HKD
+    totalRet = hk.total_return;
+    totalPnl = hk.total_pnl;
+    openCount = (SNAPSHOT.holdings || []).filter(h => h.market === 'HK').length;
+    closedCount = hk.closed_trades || 0;
+    winRate = hk.win_rate_pct || 0;
+    pf = s.profit_factor;
+    dd = s.max_drawdown;
+    label = 'HK Portfolio (HKD)';
+    ccy = 'HK$';
+  } else {
+    // ALL
+    curEq = sys.balance ?? (balHistRaw.length ? balHistRaw[balHistRaw.length-1].balance : PAPER_START);
+    totalRet = ((curEq - PAPER_START) / PAPER_START * 100);
+    totalPnl = s.total_pnl;
+    openCount = s.open_trades || 0;
+    closedCount = s.closed_trades || 0;
+    winRate = s.win_rate || 0;
+    pf = s.profit_factor;
+    dd = s.max_drawdown;
+    label = 'Combined (USD)';
+  }
+
+  const retDisplay = (market === 'ALL')
+    ? (totalRet>=0?'+':'') + totalRet.toFixed(1) + '%'
+    : ccy + fmt(totalRet);
+
+  const kpis = [
+    {label:"Portfolio value",     value: ccy + fmt(curEq), klass:"neu"},
+    {label:"Total return",        value: retDisplay,       klass:klass(totalRet)},
+    {label:"Total P&L",           value: ccy + fmt(totalPnl), klass:klass(totalPnl)},
+    {label:"Win rate",            value: (winRate||0).toFixed(1)+"%", klass:"neu"},
+    {label:"Profit factor",       value: fmt(pf), klass:klass((pf||1)-1)},
+    {label:"Trades closed",       value: closedCount, klass:"neu"},
+    {label:"Open positions",      value: openCount, klass:"neu"},
+    {label:"Max drawdown",        value: "$"+fmt(dd), klass:"neg"},
+  ];
+  document.getElementById("kpis").innerHTML = kpis.map(k =>
+    `<div class="kpi"><div class="label">${k.label}</div><div class="value ${k.klass}">${k.value}</div></div>`
+  ).join("");
+
+  // Per-market breakdown panel when ALL is selected
+  if (market === 'ALL') {
+    document.getElementById('marketBreakdown').innerHTML = `
+      <section style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px">
+        <h3 style="margin:0 0 12px 0;font-size:14px">Market breakdown</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:4px;padding:12px">
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">🇺🇸 US (USD)</div>
+            <div style="font-size:20px;font-weight:600">$${fmt(us.total_assets)}</div>
+            <div style="font-size:12px;color:var(--dim);margin-top:6px">
+              Cash: $${fmt(us.cash)} · Mkt val: $${fmt(us.market_val)}<br>
+              Total return: <span class="${klass(us.total_return)}">$${fmt(us.total_return)}</span>
+              · ${us.broker_open_positions || 0} positions
+            </div>
+          </div>
+          <div style="background:rgba(63,185,80,0.05);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:4px;padding:12px">
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">🇭🇰 HK (HKD)</div>
+            <div style="font-size:20px;font-weight:600">HK$${fmt(hk.total_assets)}</div>
+            <div style="font-size:12px;color:var(--dim);margin-top:6px">
+              Cash: HK$${fmt(hk.cash)} · Mkt val: HK$${fmt(hk.market_val)}<br>
+              ≈ USD $${fmt(hkInUSD)} @ FX ${fx} · ${(SNAPSHOT.holdings||[]).filter(h=>h.market==='HK').length} positions<br>
+              Total return: <span class="${klass(hk.total_return)}">HK$${fmt(hk.total_return)}</span>
+            </div>
+          </div>
+        </div>
+      </section>`;
+  } else {
+    document.getElementById('marketBreakdown').innerHTML = '';
+  }
+
+  // Filter holdings table by market
+  const allH = SNAPSHOT.holdings || [];
+  const filteredH = (market === 'ALL') ? allH : allH.filter(h => h.market === market);
+  const sym = (market === 'HK') ? 'HK$' : '$';
+  const holdRows = filteredH.slice(0,20).map(h => {
+    const sideColor = h.side === 'SHORT' ? 'var(--red)' : 'var(--green)';
+    const entry = h.entry_price ?? h.entry ?? h.cost_price;
+    const useLocal = market !== 'ALL';
+    const mvDisp = useLocal && market === 'HK' ? ('HK$' + fmt(h.market_val_local))
+                                                : ('$' + fmt(h.market_val_usd));
+    return `<tr><td>${h.code} <span style="color:${sideColor};font-size:10px">${h.side||''}</span></td>
+            <td>${fmt(h.qty)}</td>
+            <td>${entry != null ? '$' + fmt(entry) : '—'}</td>
+            <td class="${klass(h.pl_ratio_pct)}">${pct(h.pl_ratio_pct)}</td></tr>`;
+  }).join("");
+  const tbody = document.querySelector("#holdingsTable tbody");
+  if (tbody) tbody.innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
+}
+
+// Initial render + dropdown wiring
+renderKPIs('ALL');
+const mf = document.getElementById('marketFilter');
+if (mf) mf.addEventListener('change', e => renderKPIs(e.target.value));
 
 // Equity curve — downsample to ~300 evenly-spaced points so the line scales smoothly
 function downsample(arr, maxPts) {
@@ -341,17 +449,7 @@ const stratRows = (SNAPSHOT.strategy_breakdown || [])
              <td class="${klass(s.pnl)}">$${fmt(s.pnl)}</td></tr>`).join("");
 document.querySelector("#strategyTable tbody").innerHTML = stratRows || "<tr><td colspan=4>No data</td></tr>";
 
-// Holdings — use API field names (code, market_val_usd, pl_ratio_pct, entry_price)
-const holdRows = (SNAPSHOT.holdings || []).slice(0,15)
-  .map(h => {
-    const sideColor = h.side === 'SHORT' ? 'var(--red)' : 'var(--green)';
-    const entry = h.entry_price ?? h.entry ?? h.cost_price;
-    return `<tr><td>${h.code || h.symbol || '—'} <span style="color:${sideColor};font-size:10px">${h.side || ''}</span></td>
-            <td>${fmt(h.qty)}</td>
-            <td>${entry != null ? '$' + fmt(entry) : '—'}</td>
-            <td class="${klass(h.pl_ratio_pct ?? h.pnl_pct)}">${pct(h.pl_ratio_pct ?? h.pnl_pct)}</td></tr>`;
-  }).join("");
-document.querySelector("#holdingsTable tbody").innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
+// Holdings now rendered by renderKPIs() with market filter — no separate block needed
 
 // Directional baskets
 function renderBaskets() {
