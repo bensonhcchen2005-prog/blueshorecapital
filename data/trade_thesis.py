@@ -106,6 +106,28 @@ def get_tailwinds(code: str) -> List[str]:
     return TAILWIND_TAGS.get(sym, [])
 
 
+# ─── Horizon framework ─────────────────────────────────────────────────
+
+HORIZON_CLASSES = {
+    "TACTICAL":  {"days": 30,  "reeval": "daily",
+                  "use_case": "Mean-reversion, technical bounce, near-term catalyst"},
+    "SWING":     {"days": 90,  "reeval": "weekly",
+                  "use_case": "Standard signal trade with mild fundamental backing"},
+    "CATALYST":  {"days": 180, "reeval": "bi-weekly",
+                  "use_case": "Specific earnings/macro/product catalyst in 6mo window"},
+    "COMPOUNDER":{"days": 540, "reeval": "monthly",
+                  "use_case": "Long-duration secular bet, 5x-20x candidates"},
+}
+
+
+def classify_horizon(days: int) -> str:
+    """Map days_horizon to canonical class name."""
+    if days <= 30:  return "TACTICAL"
+    if days <= 90:  return "SWING"
+    if days <= 180: return "CATALYST"
+    return "COMPOUNDER"
+
+
 # ─── Thesis record builder ──────────────────────────────────────────────
 
 def build_thesis(code: str, side: str, qty: float,
@@ -114,7 +136,8 @@ def build_thesis(code: str, side: str, qty: float,
                  qualitative: Dict,
                  target_price: Optional[float] = None,
                  stop_price: Optional[float] = None,
-                 time_horizon_days: int = 60) -> Dict:
+                 time_horizon_days: int = 60,
+                 horizon_rationale: Optional[str] = None) -> Dict:
     """
     Build a complete thesis record for a new position.
 
@@ -165,6 +188,9 @@ def build_thesis(code: str, side: str, qty: float,
             "price": target_price,
             "upside_pct": upside_pct,
             "horizon_days": time_horizon_days,
+            "horizon_class": classify_horizon(time_horizon_days),
+            "horizon_rationale": horizon_rationale or HORIZON_CLASSES[classify_horizon(time_horizon_days)]["use_case"],
+            "reeval_cadence": HORIZON_CLASSES[classify_horizon(time_horizon_days)]["reeval"],
         },
         "invalidation": {
             "stop_price": stop_price,

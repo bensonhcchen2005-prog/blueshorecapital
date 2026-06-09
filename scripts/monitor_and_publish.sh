@@ -18,9 +18,13 @@ export PATH="/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$PATH"
 
 echo "[$(date)] === Monitor + Publish cycle ==="
 
-# 1. Run thesis monitor (writes logs/thesis_alerts_latest.json)
+# 1a. Run thesis monitor (writes logs/thesis_alerts_latest.json)
 echo "[$(date)] Running thesis monitor..."
 ./venv/bin/python -m monitoring.thesis_monitor 2>&1 | grep -vE "open_context_base|^2026-|NotOpenSSL|urllib3" | tail -20
+
+# 1b. Run news scanner (writes logs/news_alerts_latest.json)
+echo "[$(date)] Running news scanner..."
+./venv/bin/python -m monitoring.news_scanner 2>&1 | grep -vE "NotOpenSSL|urllib3|warnings|HTTP Error" | tail -10
 
 # 2. Make sure dashboard is up
 if ! curl -sf -o /dev/null --max-time 5 http://localhost:8877/api/data; then

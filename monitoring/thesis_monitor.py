@@ -51,16 +51,17 @@ DETERIORATION_RULES = [
 
 
 def check_rev_growth_decay(entry: Dict, curr: Dict) -> Optional[Dict]:
-    """Revenue growth fell >30% relative."""
+    """Revenue growth fell >15% relative (was 30%, tightened)."""
     e = entry.get("rev_growth")
     c = curr.get("rev_growth")
     if e is None or c is None or abs(e) < 0.05:
         return None
     decay = (e - c) / abs(e)
-    if decay > 0.30:
+    if decay > 0.15:
+        sev = "YELLOW" if decay < 0.25 else "ORANGE" if decay < 0.45 else "RED"
         return {
             "rule": "rev_growth_decay",
-            "severity": "ORANGE" if decay < 0.5 else "RED",
+            "severity": sev,
             "weight": 25,
             "detail": f"Rev growth {e*100:.1f}% → {c*100:.1f}% ({decay*100:.0f}% drop)",
         }
@@ -68,16 +69,17 @@ def check_rev_growth_decay(entry: Dict, curr: Dict) -> Optional[Dict]:
 
 
 def check_margin_compression(entry: Dict, curr: Dict) -> Optional[Dict]:
-    """Operating margin compressed >5pp."""
+    """Operating margin compressed >3pp (was 5pp, tightened)."""
     e = entry.get("op_margin")
     c = curr.get("op_margin")
     if e is None or c is None:
         return None
     drop = e - c
-    if drop > 0.05:
+    if drop > 0.03:
+        sev = "YELLOW" if drop < 0.05 else "ORANGE" if drop < 0.08 else "RED"
         return {
             "rule": "margin_compression",
-            "severity": "ORANGE" if drop < 0.10 else "RED",
+            "severity": sev,
             "weight": 20,
             "detail": f"Op margin {e*100:.1f}% → {c*100:.1f}% (−{drop*100:.1f}pp)",
         }
@@ -85,16 +87,17 @@ def check_margin_compression(entry: Dict, curr: Dict) -> Optional[Dict]:
 
 
 def check_gross_margin_compression(entry: Dict, curr: Dict) -> Optional[Dict]:
-    """Gross margin compressed >3pp (slower-moving, so tighter threshold)."""
+    """Gross margin compressed >2pp (was 3pp, tightened)."""
     e = entry.get("gross_margin")
     c = curr.get("gross_margin")
     if e is None or c is None:
         return None
     drop = e - c
-    if drop > 0.03:
+    if drop > 0.02:
+        sev = "YELLOW" if drop < 0.04 else "ORANGE"
         return {
             "rule": "gross_margin_compression",
-            "severity": "YELLOW" if drop < 0.06 else "ORANGE",
+            "severity": sev,
             "weight": 15,
             "detail": f"Gross margin {e*100:.1f}% → {c*100:.1f}% (−{drop*100:.1f}pp)",
         }
@@ -102,16 +105,17 @@ def check_gross_margin_compression(entry: Dict, curr: Dict) -> Optional[Dict]:
 
 
 def check_pe_rerate_up(entry: Dict, curr: Dict) -> Optional[Dict]:
-    """Forward P/E rose >50% — thesis maybe priced in."""
+    """Forward P/E rose >30% — thesis maybe priced in (was 50%, tightened)."""
     e = entry.get("forward_pe")
     c = curr.get("forward_pe")
     if e is None or c is None or e <= 0:
         return None
     rerate = (c - e) / e
-    if rerate > 0.5:
+    if rerate > 0.30:
+        sev = "YELLOW" if rerate < 0.50 else "ORANGE"
         return {
             "rule": "pe_rerate_up",
-            "severity": "YELLOW",
+            "severity": sev,
             "weight": 10,
             "detail": f"Fwd P/E {e:.1f} → {c:.1f} (+{rerate*100:.0f}%). Multiple expansion may be done.",
         }
@@ -119,16 +123,17 @@ def check_pe_rerate_up(entry: Dict, curr: Dict) -> Optional[Dict]:
 
 
 def check_analyst_target_drop(entry: Dict, curr: Dict) -> Optional[Dict]:
-    """Analyst price target dropped >10%."""
+    """Analyst price target dropped >7% (was 10%, tightened)."""
     e = entry.get("analyst_price_target")
     c = curr.get("analyst_price_target")
     if e is None or c is None or e <= 0:
         return None
     drop = (e - c) / e
-    if drop > 0.10:
+    if drop > 0.07:
+        sev = "YELLOW" if drop < 0.15 else "ORANGE" if drop < 0.25 else "RED"
         return {
             "rule": "analyst_target_drop",
-            "severity": "YELLOW" if drop < 0.20 else "ORANGE",
+            "severity": sev,
             "weight": 10,
             "detail": f"Analyst tgt ${e:.0f} → ${c:.0f} (−{drop*100:.0f}%)",
         }
@@ -136,16 +141,17 @@ def check_analyst_target_drop(entry: Dict, curr: Dict) -> Optional[Dict]:
 
 
 def check_quality_score_drop(entry: Dict, curr_q: float) -> Optional[Dict]:
-    """Quality score (composite) fell >15pp."""
+    """Quality score (composite) fell >10pp (was 15pp, tightened)."""
     from data.fundamentals import compute_quality_score
     e = compute_quality_score(entry) if entry else None
     if e is None or curr_q is None:
         return None
     drop = e - curr_q
-    if drop > 0.15:
+    if drop > 0.10:
+        sev = "YELLOW" if drop < 0.15 else "ORANGE" if drop < 0.25 else "RED"
         return {
             "rule": "quality_score_drop",
-            "severity": "ORANGE",
+            "severity": sev,
             "weight": 15,
             "detail": f"Quality {e:.2f} → {curr_q:.2f} (−{drop:.2f})",
         }
@@ -153,7 +159,7 @@ def check_quality_score_drop(entry: Dict, curr_q: float) -> Optional[Dict]:
 
 
 def check_stop_proximity(thesis: Dict, current_price: Optional[float]) -> Optional[Dict]:
-    """Price within 3% of stop — high-risk."""
+    """Price within 5% of stop — early warning (was 3%, tightened to wider window)."""
     if current_price is None:
         return None
     stop = (thesis.get("invalidation") or {}).get("stop_price")
@@ -161,17 +167,18 @@ def check_stop_proximity(thesis: Dict, current_price: Optional[float]) -> Option
         return None
     side = thesis.get("side", "LONG")
     distance_pct = (current_price - stop) / stop * 100 if side == "LONG" else (stop - current_price) / stop * 100
-    if -3 < distance_pct < 3:  # within 3% of stop in either direction
+    if -5 < distance_pct < 5:  # within 5% of stop
+        sev = "RED" if distance_pct < 2 else "ORANGE" if distance_pct < 3.5 else "YELLOW"
         return {
             "rule": "near_stop",
-            "severity": "RED" if distance_pct < 1 else "ORANGE",
+            "severity": sev,
             "weight": 30,
             "detail": f"Price ${current_price:.2f} is {abs(distance_pct):.1f}% from stop ${stop:.2f}",
         }
     return None
 
 
-def check_earnings_proximity(thesis: Dict, days: int = 5) -> Optional[Dict]:
+def check_earnings_proximity(thesis: Dict, days: int = 7) -> Optional[Dict]:
     """Earnings within N days — heightened risk."""
     next_earn = (thesis.get("quantitative") or {}).get("next_earnings_date")
     if not next_earn:

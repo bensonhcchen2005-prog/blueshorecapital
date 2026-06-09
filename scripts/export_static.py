@@ -147,6 +147,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
     <button data-tab="overview" class="tab-btn active">Overview</button>
+    <button data-tab="baskets"  class="tab-btn">Baskets</button>
     <button data-tab="theses"   class="tab-btn">Active Theses</button>
     <button data-tab="details"  class="tab-btn">Trade Details</button>
     <button data-tab="alerts"   class="tab-btn">Alerts &amp; Macro</button>
@@ -179,6 +180,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </section>
   </div>
   </div><!-- /tab-overview -->
+
+  <div id="tab-baskets" class="tab-panel" style="display:none">
+    <section>
+      <h2>Directional baskets</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Positions grouped by the directional bet they express. Each basket shows the thematic thesis,
+        gross notional, P&amp;L, and member positions.
+      </div>
+      <div id="basketsSummary" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
+      <div id="basketsList"></div>
+    </section>
+  </div>
 
   <div id="tab-theses" class="tab-panel" style="display:none">
     <section>
@@ -216,6 +229,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="alertsSummary" style="display:flex;gap:8px;margin-bottom:14px"></div>
       <div id="alertsList"></div>
     </section>
+
+    <section>
+      <h2>News scanner — last 24h</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Headlines per active position scanned against deterioration keywords
+        (downgrades, guidance cuts, lawsuits, recalls, sanctions, executive departures).
+      </div>
+      <div id="newsSummary" style="display:flex;gap:8px;margin-bottom:14px"></div>
+      <div id="newsList"></div>
+    </section>
   </div>
 
   <div id="tab-funnel" class="tab-panel" style="display:none">
@@ -238,6 +261,8 @@ const SNAPSHOT = {{SNAPSHOT}};
 const PIPELINE = {{PIPELINE}};
 const THESES   = {{THESES}};
 const ALERTS   = {{ALERTS}};
+const NEWS     = {{NEWS}};
+const BASKETS  = {{BASKETS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -322,6 +347,132 @@ const holdRows = (SNAPSHOT.holdings || []).slice(0,15)
              <td>$${fmt(h.entry||h.cost_price)}</td>
              <td class="${klass(h.pnl_pct)}">${pct(h.pnl_pct)}</td></tr>`).join("");
 document.querySelector("#holdingsTable tbody").innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
+
+// Directional baskets
+function renderBaskets() {
+  const data = BASKETS || {};
+  const baskets = data.baskets || [];
+  const summary = data.summary || {};
+
+  // Summary tiles
+  const tile = (label, val, color) => `<div style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px;flex:1;min-width:140px">
+    <div style="font-size:11px;color:var(--dim);text-transform:uppercase">${label}</div>
+    <div style="font-size:18px;font-weight:600;color:${color}">${val}</div>
+  </div>`;
+  const fmtUsd = n => '$' + (n||0).toLocaleString(undefined,{maximumFractionDigits:0});
+  document.getElementById('basketsSummary').innerHTML =
+    tile('Long gross', fmtUsd(summary.long_gross), 'var(--green)') +
+    tile('Short gross', fmtUsd(summary.short_gross), 'var(--red)') +
+    tile('Net directional', fmtUsd(summary.net_directional),
+         (summary.net_directional||0) >= 0 ? 'var(--green)' : 'var(--red)') +
+    tile('Active baskets', summary.n_baskets || 0, 'var(--blue)');
+
+  if (!baskets.length) {
+    document.getElementById('basketsList').innerHTML =
+      '<div style="color:var(--dim);padding:14px">No active baskets.</div>';
+    return;
+  }
+
+  document.getElementById('basketsList').innerHTML = baskets.map(b => {
+    const dirColor = b.direction === 'LONG' ? 'var(--green)' :
+                     b.direction === 'SHORT' ? 'var(--red)' : 'var(--blue)';
+    const pnlColor = (b.unrealized_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    return `
+      <details style="background:var(--surface);border:1px solid var(--border);border-left:4px solid ${dirColor};border-radius:6px;margin-bottom:10px">
+        <summary style="cursor:pointer;list-style:none;padding:14px 16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+            <div style="flex:1;min-width:200px">
+              <div style="font-weight:600;font-size:14px">${b.name}
+                <span style="color:${dirColor};font-size:12px;margin-left:8px">${b.direction}</span>
+              </div>
+              <div style="font-size:11px;color:var(--dim);margin-top:2px">${b.thesis}</div>
+            </div>
+            <div style="text-align:right;min-width:200px">
+              <div style="font-size:11px;color:var(--dim)">${b.n_positions} positions · gross ${fmtUsd(b.gross_notional)}</div>
+              <div style="color:${pnlColor};font-weight:600;font-size:14px">${(b.unrealized_pnl||0)>=0?'+':''}${fmtUsd(b.unrealized_pnl).replace('$','$')}</div>
+            </div>
+          </div>
+        </summary>
+        <div style="border-top:1px solid var(--border);padding:14px 16px">
+          <table style="width:100%;font-size:12px">
+            <thead><tr style="color:var(--dim);text-transform:uppercase;font-size:10px">
+              <th style="text-align:left;padding:6px">Code</th>
+              <th style="text-align:left">Side</th>
+              <th style="text-align:left">Horizon</th>
+              <th style="text-align:right">Notional</th>
+              <th style="text-align:right">P&amp;L</th>
+              <th style="text-align:left;padding-left:14px">Thesis</th>
+            </tr></thead>
+            <tbody>
+              ${b.members.map(m => `<tr style="border-top:1px solid var(--border)">
+                <td style="padding:6px;font-weight:600">${m.code}</td>
+                <td style="color:${m.side==='LONG'?'var(--green)':'var(--red)'}">${m.side || '—'}</td>
+                <td style="font-size:11px;color:var(--dim)">${m.horizon_class || '—'}</td>
+                <td style="text-align:right">${fmtUsd(m.market_val_usd)}</td>
+                <td style="text-align:right;color:${(m.unrealized_pnl||0)>=0?'var(--green)':'var(--red)'}">${(m.unrealized_pnl||0)>=0?'+':''}${fmtUsd(m.unrealized_pnl)}</td>
+                <td style="padding-left:14px;font-size:11px;color:var(--dim)">${(m.thesis_summary||'').slice(0,80)}${(m.thesis_summary||'').length>80?'…':''}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>`;
+  }).join('');
+}
+renderBaskets();
+
+// News scanner
+function renderNews() {
+  const data = NEWS || {};
+  const counts = data.counts || {RED:0,ORANGE:0,YELLOW:0,POSITIVE:0,NEUTRAL:0};
+  const sev = (label, n, color) => `<div style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:8px 12px;flex:1;min-width:80px">
+    <div style="font-size:10px;color:var(--dim);text-transform:uppercase">${label}</div>
+    <div style="font-size:18px;font-weight:600;color:${color}">${n}</div>
+  </div>`;
+  document.getElementById('newsSummary').innerHTML =
+    sev('Red', counts.RED, 'var(--red)') +
+    sev('Orange', counts.ORANGE, 'var(--amber)') +
+    sev('Yellow', counts.YELLOW, '#d29922') +
+    sev('Positive', counts.POSITIVE, 'var(--green)') +
+    sev('Neutral', counts.NEUTRAL, 'var(--dim)');
+
+  const flagged = [...(data.red_alerts||[]), ...(data.orange_alerts||[])];
+  if (!flagged.length) {
+    document.getElementById('newsList').innerHTML =
+      '<div style="color:var(--green);padding:14px;background:rgba(63,185,80,0.08);border:1px solid var(--green);border-radius:6px">✓ No RED or ORANGE news flags across the book.</div>';
+  } else {
+    const sevColor = {RED:'var(--red)', ORANGE:'var(--amber)'};
+    document.getElementById('newsList').innerHTML = flagged.map(a => `
+      <div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid ${sevColor[a.headlines[0]?.severity||'ORANGE']};border-radius:6px;padding:14px;margin-bottom:10px">
+        <div style="font-weight:600;font-size:14px;margin-bottom:8px">${a.code}</div>
+        ${a.headlines.map(h => `
+          <div style="padding:6px 0;border-top:1px solid rgba(255,255,255,0.05)">
+            <div style="font-size:12px">${h.url ? '<a href="'+h.url+'" target="_blank" rel="noopener" style="color:var(--text)">' : ''}${h.title}${h.url ? '</a>' : ''}</div>
+            <div style="font-size:10px;color:var(--dim);margin-top:3px">
+              ${h.source || '?'} · ${h.pub_at ? h.pub_at.slice(0,16) : '?'}
+              · keywords: <span style="color:${sevColor[h.severity]}">${(h.keywords||[]).join(', ')}</span>
+            </div>
+          </div>`).join('')}
+      </div>`).join('');
+  }
+
+  // Also surface per-code summary (top 5 codes by news volume) below
+  const byCode = data.by_code || {};
+  const entries = Object.values(byCode).filter(s => s.n_items > 0)
+    .sort((a,b) => b.n_items - a.n_items).slice(0, 8);
+  if (entries.length) {
+    const html = '<div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:18px;margin-bottom:8px">Per-position activity</div>' +
+      '<table style="width:100%;font-size:12px"><thead><tr style="color:var(--dim);font-size:10px;text-transform:uppercase">' +
+      '<th style="text-align:left;padding:6px">Code</th><th>Headlines</th><th>Max severity</th>' +
+      '</tr></thead><tbody>' +
+      entries.map(e => `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:6px;font-weight:600">${e.code}</td>
+        <td>${e.n_items}</td>
+        <td style="color:${({'RED':'var(--red)','ORANGE':'var(--amber)','YELLOW':'#d29922','POSITIVE':'var(--green)','NEUTRAL':'var(--dim)'})[e.max_severity] || 'var(--dim)'}">${e.max_severity}</td>
+      </tr>`).join('') + '</tbody></table>';
+    document.getElementById('newsList').insertAdjacentHTML('beforeend', html);
+  }
+}
+renderNews();
 
 // Alerts + Macro
 function renderAlerts() {
@@ -480,8 +631,33 @@ function renderTradeDetails() {
             <div class="val" style="color:var(--red)">${invalid.stop_price?'$'+invalid.stop_price.toFixed(2):'—'}</div>
           </div>
           <div class="trade-meta-cell">
-            <div class="lbl">Horizon</div>
-            <div class="val">${target.horizon_days||'—'} days</div>
+            <div class="lbl">Horizon class</div>
+            <div class="val">${target.horizon_class || '—'} <span style="color:var(--dim);font-weight:normal;font-size:11px">(${target.horizon_days||'?'}d)</span></div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Entry date</div>
+            <div class="val">${t.entry_date || '—'}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Days held</div>
+            <div class="val">${t.days_held != null ? t.days_held.toFixed(1) : '—'}d
+              ${t.horizon_utilization_pct != null ? '<span style="color:var(--dim);font-weight:normal;font-size:11px"> ('+t.horizon_utilization_pct.toFixed(0)+'%)</span>' : ''}
+            </div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Days remaining</div>
+            <div class="val">${t.days_remaining != null ? t.days_remaining.toFixed(0) + 'd' : '—'}</div>
+          </div>
+          <div class="trade-meta-cell">
+            <div class="lbl">Re-eval cadence</div>
+            <div class="val" style="font-size:13px">${target.reeval_cadence || '—'}</div>
+          </div>
+        </div>
+
+        <div class="trade-section">
+          <h4>Horizon rationale</h4>
+          <div style="font-size:12px;color:var(--text);background:rgba(88,166,255,0.05);border-left:2px solid var(--blue);padding:8px 12px;border-radius:0 4px 4px 0;font-style:italic">
+            ${target.horizon_rationale || '—'}
           </div>
         </div>
 
@@ -634,6 +810,7 @@ if (bn) {
 
 
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
+           news: dict, baskets: dict,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -642,6 +819,8 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{PIPELINE}}", json.dumps(pipeline, default=str))
             .replace("{{THESES}}",   json.dumps(theses,   default=str))
             .replace("{{ALERTS}}",   json.dumps(alerts,   default=str))
+            .replace("{{NEWS}}",     json.dumps(news,     default=str))
+            .replace("{{BASKETS}}",  json.dumps(baskets,  default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -670,13 +849,21 @@ def main() -> None:
             alerts = fetch(f"{args.base}/api/alerts")
         except Exception:
             alerts = {"alerts": [], "macro": {}, "counts": {}}
+        try:
+            news = fetch(f"{args.base}/api/news")
+        except Exception:
+            news = {"by_code": {}, "counts": {}, "red_alerts": [], "orange_alerts": []}
+        try:
+            baskets = fetch(f"{args.base}/api/baskets")
+        except Exception:
+            baskets = {"baskets": [], "summary": {}}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    html = render(snap, pipe, theses, alerts, args.gh_repo, args.paper_start)
+    html = render(snap, pipe, theses, alerts, news, baskets, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

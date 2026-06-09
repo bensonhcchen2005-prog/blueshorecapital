@@ -581,6 +581,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_theses()
         elif self.path == "/api/alerts":
             self._serve_alerts()
+        elif self.path == "/api/news":
+            self._serve_news()
+        elif self.path == "/api/baskets":
+            self._serve_baskets()
         elif self.path == "/api/sleeves":
             self._serve_sleeves()
         elif self.path.startswith("/api/pipeline/missed"):
@@ -1499,6 +1503,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if t.get("current_price") and t.get("entry_price"):
                     raw_chg = (t["current_price"]/t["entry_price"] - 1) * 100
                     t["price_change_pct"] = round(raw_chg if t["side"] == "LONG" else -raw_chg, 2)
+                # Days held + horizon utilisation
+                try:
+                    opened = datetime.fromisoformat(t["opened_at"].replace("Z","+00:00"))
+                    now_utc = datetime.now(timezone.utc)
+                    days_held = (now_utc - opened).total_seconds() / 86400
+                    t["entry_date"] = opened.strftime("%Y-%m-%d")
+                    t["days_held"] = round(days_held, 1)
+                    horizon_d = (t.get("target") or {}).get("horizon_days") or 90
+                    t["horizon_utilization_pct"] = round(days_held / horizon_d * 100, 1)
+                    t["days_remaining"] = max(0, round(horizon_d - days_held, 1))
+                except Exception:
+                    pass
             self._send_json({
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
                 "count": len(theses),
@@ -1518,6 +1534,166 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._send_json({"alerts": [], "macro": {}, "counts": {}})
         except Exception as e:
             self._send_json({"error": str(e), "alerts": [], "macro": {}})
+
+    def _serve_news(self):
+        """Return latest news scanner output."""
+        try:
+            from pathlib import Path
+            p = Path(__file__).parent.parent / "logs" / "news_alerts_latest.json"
+            if p.exists():
+                self._send_json(json.loads(p.read_text()))
+            else:
+                self._send_json({"by_code": {}, "counts": {},
+                                 "red_alerts": [], "orange_alerts": []})
+        except Exception as e:
+            self._send_json({"error": str(e), "by_code": {}})
+
+    def _serve_baskets(self):
+        """Group active theses into directional baskets/themes."""
+        try:
+            from data.trade_thesis import get_active_theses
+            theses = get_active_theses()
+            broker = read_broker_snapshot()
+            mv_by_code = {p["code"]: abs(float(p.get("market_val_usd", 0)))
+                          for p in (broker.get("positions") or [])}
+            pnl_by_code = {p["code"]: float(p.get("pl_val_usd", 0))
+                           for p in (broker.get("positions") or [])}
+
+            # Basket definitions — each is a directional bet
+            BASKETS = {
+                "AI Infrastructure (Long)": {
+                    "direction": "LONG", "thesis":
+                    "Multi-year AI compute buildout — custom silicon, networking, GPUs.",
+                    "members": ["US.AVGO","US.ANET","US.PLTR","US.AMD","US.ARM",
+                                "US.MU","US.SMCI","US.TSM","US.NVDA"],
+                },
+                "Mega-cap Compounders (Long)": {
+                    "direction": "LONG", "thesis":
+                    "Quality compounders with durable moats and capital return.",
+                    "members": ["US.GOOGL","US.META","US.AAPL","US.AMZN"],
+                },
+                "Financials Quality (Long)": {
+                    "direction": "LONG", "thesis":
+                    "Best-in-class universal banks + IB upside.",
+                    "members": ["US.JPM","US.GS"],
+                },
+                "Healthcare Compounders (Long)": {
+                    "direction": "LONG", "thesis":
+                    "GLP1 monopoly (LLY), pharma defensive (JNJ), surgical robotics (ISRG).",
+                    "members": ["US.LLY","US.JNJ","US.ISRG"],
+                },
+                "Macro Hedge — Gold (Long)": {
+                    "direction": "LONG", "thesis":
+                    "Inflation + risk-off hedge.",
+                    "members": ["US.GLD"],
+                },
+                "China Tech Recovery (Long)": {
+                    "direction": "LONG", "thesis":
+                    "Regulatory/sentiment trough; Weixin ad monetization.",
+                    "members": ["HK.00700"],
+                },
+                "Tech Concentration Hedge (Short)": {
+                    "direction": "SHORT", "thesis":
+                    "Hedge against mega-cap tech bubble valuation and AI-capex margin pressure.",
+                    "members": ["US.MSFT","US.AMZN","US.ORCL","US.XLK"],
+                },
+                "Crypto/BTC Hedge (Short)": {
+                    "direction": "SHORT", "thesis":
+                    "Leveraged BTC-proxy premium-to-NAV decay.",
+                    "members": ["US.MSTR"],
+                },
+                "Financials Pair-Hedge (Short)": {
+                    "direction": "SHORT", "thesis":
+                    "Relative-value: short MS/BAC vs long JPM/GS.",
+                    "members": ["US.MS","US.BAC"],
+                },
+                "Healthcare Distress (Short)": {
+                    "direction": "SHORT", "thesis":
+                    "MLR pressure + regulatory overhang.",
+                    "members": ["US.UNH"],
+                },
+                "Small-cap Fragility (Short)": {
+                    "direction": "SHORT", "thesis":
+                    "Russell 2000 credit-cycle exposure.",
+                    "members": ["US.IWM"],
+                },
+                "Consumer Staples Reversion (Short)": {
+                    "direction": "SHORT", "thesis":
+                    "Mean-reversion candidate; valuation overshoot.",
+                    "members": ["US.WMT"],
+                },
+            }
+
+            baskets_out = []
+            assigned = set()
+            for name, spec in BASKETS.items():
+                members_with_data = []
+                gross = 0.0; pnl = 0.0
+                for code in spec["members"]:
+                    if code not in theses:
+                        continue
+                    t = theses[code]
+                    mv = mv_by_code.get(code, 0)
+                    p = pnl_by_code.get(code, 0)
+                    members_with_data.append({
+                        "code": code, "side": t.get("side"), "sector": t.get("sector"),
+                        "qty": t.get("qty"), "entry_price": t.get("entry_price"),
+                        "market_val_usd": mv, "unrealized_pnl": p,
+                        "thesis_summary": (t.get("qualitative") or {}).get("thesis_summary",""),
+                        "horizon_class": (t.get("target") or {}).get("horizon_class"),
+                    })
+                    gross += mv
+                    pnl += p
+                    assigned.add(code)
+                if members_with_data:
+                    baskets_out.append({
+                        "name": name,
+                        "direction": spec["direction"],
+                        "thesis": spec["thesis"],
+                        "n_positions": len(members_with_data),
+                        "gross_notional": round(gross, 2),
+                        "unrealized_pnl": round(pnl, 2),
+                        "members": members_with_data,
+                    })
+
+            # Any unassigned active theses go to "Other"
+            other = []
+            for code, t in theses.items():
+                if code in assigned:
+                    continue
+                other.append({
+                    "code": code, "side": t.get("side"), "sector": t.get("sector"),
+                    "market_val_usd": mv_by_code.get(code, 0),
+                    "unrealized_pnl": pnl_by_code.get(code, 0),
+                    "thesis_summary": (t.get("qualitative") or {}).get("thesis_summary",""),
+                })
+            if other:
+                baskets_out.append({
+                    "name": "Other / Unclassified",
+                    "direction": "MIXED",
+                    "thesis": "Active theses not yet assigned to a basket.",
+                    "n_positions": len(other),
+                    "gross_notional": sum(m["market_val_usd"] for m in other),
+                    "unrealized_pnl": sum(m["unrealized_pnl"] for m in other),
+                    "members": other,
+                })
+
+            # Summary
+            long_gross = sum(b["gross_notional"] for b in baskets_out if b["direction"] == "LONG")
+            short_gross = sum(b["gross_notional"] for b in baskets_out if b["direction"] == "SHORT")
+
+            self._send_json({
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "baskets": baskets_out,
+                "summary": {
+                    "n_baskets": len(baskets_out),
+                    "long_gross": round(long_gross, 2),
+                    "short_gross": round(short_gross, 2),
+                    "net_directional": round(long_gross - short_gross, 2),
+                },
+            })
+        except Exception as e:
+            self._send_json({"error": str(e), "baskets": []})
 
     def _serve_static_html(self, filename: str):
         """Serve a static HTML file from the project root."""
