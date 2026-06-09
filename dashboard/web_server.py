@@ -581,6 +581,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_theses()
         elif self.path == "/api/alerts":
             self._serve_alerts()
+        elif self.path == "/api/costs":
+            self._serve_costs()
         elif self.path == "/api/news":
             self._serve_news()
         elif self.path == "/api/baskets":
@@ -1532,6 +1534,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             self._send_json({"error": str(e), "theses": [], "count": 0})
+
+    def _serve_costs(self):
+        """Return per-position lifetime trade costs."""
+        try:
+            from pathlib import Path
+            p = Path(__file__).parent.parent / "logs" / "trade_costs_latest.json"
+            if p.exists():
+                self._send_json(json.loads(p.read_text()))
+            else:
+                self._send_json({"per_code": {}, "totals": {}})
+        except Exception as e:
+            self._send_json({"error": str(e), "per_code": {}, "totals": {}})
 
     def _serve_alerts(self):
         """Return latest thesis-monitor alerts + macro snapshot."""

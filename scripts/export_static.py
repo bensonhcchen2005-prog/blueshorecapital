@@ -216,6 +216,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div id="tab-details" class="tab-panel" style="display:none">
     <section>
+      <h2>Trade-cost tracking</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Real fees per position: entry + exit + short borrow. Helps catch cost-burn before it eats P&amp;L.
+      </div>
+      <div id="costsSummary" style="display:flex;gap:10px;margin-bottom:14px"></div>
+      <div id="costsTable"></div>
+    </section>
+
+    <section>
       <h2>Per-trade details</h2>
       <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
         Full record of every position: entry signals, fundamentals at entry, target, stop, real-time P&amp;L, KPIs to monitor, thesis breakers.
@@ -273,6 +282,7 @@ const THESES   = {{THESES}};
 const ALERTS   = {{ALERTS}};
 const NEWS     = {{NEWS}};
 const BASKETS  = {{BASKETS}};
+const COSTS    = {{COSTS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -653,6 +663,68 @@ function renderAlerts() {
 }
 renderAlerts();
 
+// Costs
+function renderCosts() {
+  const c = COSTS || {};
+  const per = c.per_code || {};
+  const totals = c.totals || {};
+  const codes = Object.keys(per).sort((a,b) => (per[b].total_cost||0) - (per[a].total_cost||0));
+
+  // Summary tiles
+  const tile = (label, val, color) =>
+    `<div style="flex:1;background:var(--surface);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px;min-width:140px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase">${label}</div>
+      <div style="font-size:18px;font-weight:600">$${fmt(val||0)}</div>
+    </div>`;
+  document.getElementById('costsSummary').innerHTML =
+    tile('Total cost', totals.all_codes_total_cost, 'var(--blue)') +
+    tile('Entry fees', totals.entry, 'var(--green)') +
+    tile('Exit fees', totals.exit, 'var(--amber)') +
+    tile('Borrow cost', totals.borrow, 'var(--red)');
+
+  // Per-code table
+  if (codes.length === 0) {
+    document.getElementById('costsTable').innerHTML =
+      '<div style="color:var(--dim);font-style:italic;padding:14px">No cost records yet — trades placed via the new flow will appear here.</div>';
+    return;
+  }
+  // Pull unrealized P&L per code from holdings for the cost-burn ratio
+  const pnlByCode = {};
+  (SNAPSHOT.holdings||[]).forEach(h => { pnlByCode[h.code] = h.pl_val_usd; });
+
+  let html = `<table style="width:100%;font-size:13px">
+    <thead><tr>
+      <th style="text-align:left;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">CODE</th>
+      <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">ENTRY</th>
+      <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">EXIT</th>
+      <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">BORROW</th>
+      <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">TOTAL</th>
+      <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">UNREAL P&amp;L</th>
+      <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">COST/P&amp;L</th>
+    </tr></thead><tbody>`;
+  codes.forEach(code => {
+    const x = per[code];
+    const pnl = pnlByCode[code];
+    const ratio = (pnl && Math.abs(pnl) > 0) ? (x.total_cost / Math.abs(pnl) * 100) : null;
+    const ratioColor = ratio == null ? 'var(--dim)'
+                     : ratio > 20 ? 'var(--red)'
+                     : ratio > 10 ? 'var(--amber)' : 'var(--green)';
+    html += `<tr style="border-bottom:1px solid rgba(48,54,61,0.3)">
+      <td style="padding:6px 8px">${code}</td>
+      <td style="text-align:right;padding:6px 8px">$${(x.entry_cost||0).toFixed(2)}</td>
+      <td style="text-align:right;padding:6px 8px">$${(x.exit_cost||0).toFixed(2)}</td>
+      <td style="text-align:right;padding:6px 8px">$${(x.borrow_cost||0).toFixed(2)}</td>
+      <td style="text-align:right;padding:6px 8px;font-weight:600">$${(x.total_cost||0).toFixed(2)}</td>
+      <td style="text-align:right;padding:6px 8px;color:${klass(pnl)==='pos'?'var(--green)':klass(pnl)==='neg'?'var(--red)':'var(--dim)'}">${pnl!=null?'$'+fmt(pnl):'—'}</td>
+      <td style="text-align:right;padding:6px 8px;color:${ratioColor};font-weight:600">${ratio!=null?ratio.toFixed(1)+'%':'—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  html += '<div style="font-size:11px;color:var(--dim);margin-top:8px">Cost/P&L >20% in red = fees are eating returns, consider closing/reducing position</div>';
+  document.getElementById('costsTable').innerHTML = html;
+}
+renderCosts();
+
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -913,7 +985,7 @@ if (bn) {
 
 
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
-           news: dict, baskets: dict,
+           news: dict, baskets: dict, costs: dict = None,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -924,6 +996,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{ALERTS}}",   json.dumps(alerts,   default=str))
             .replace("{{NEWS}}",     json.dumps(news,     default=str))
             .replace("{{BASKETS}}",  json.dumps(baskets,  default=str))
+            .replace("{{COSTS}}",    json.dumps(costs or {"per_code":{},"totals":{}}, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -960,13 +1033,17 @@ def main() -> None:
             baskets = fetch(f"{args.base}/api/baskets")
         except Exception:
             baskets = {"baskets": [], "summary": {}}
+        try:
+            costs = fetch(f"{args.base}/api/costs")
+        except Exception:
+            costs = {"per_code": {}, "totals": {}}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    html = render(snap, pipe, theses, alerts, news, baskets, args.gh_repo, args.paper_start)
+    html = render(snap, pipe, theses, alerts, news, baskets, costs, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
