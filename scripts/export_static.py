@@ -335,17 +335,22 @@ new Chart(document.getElementById("equityChart"), {
             y:{ticks:{color:"#8b949e",callback:v=>"$"+v.toLocaleString()},grid:{color:"#30363d"}}}}
 });
 
-// Strategies
+// Strategies (API returns 'name', not 'strategy')
 const stratRows = (SNAPSHOT.strategy_breakdown || [])
-  .map(s => `<tr><td>${s.strategy}</td><td>${s.trades||0}</td><td>${(s.win_rate||0).toFixed(1)}%</td>
+  .map(s => `<tr><td>${s.name || s.strategy || '—'}</td><td>${s.trades||0}</td><td>${(s.win_rate||0).toFixed(1)}%</td>
              <td class="${klass(s.pnl)}">$${fmt(s.pnl)}</td></tr>`).join("");
 document.querySelector("#strategyTable tbody").innerHTML = stratRows || "<tr><td colspan=4>No data</td></tr>";
 
-// Holdings
+// Holdings — use API field names (code, market_val_usd, pl_ratio_pct, entry_price)
 const holdRows = (SNAPSHOT.holdings || []).slice(0,15)
-  .map(h => `<tr><td>${h.symbol||""}</td><td>${fmt(h.qty)}</td>
-             <td>$${fmt(h.entry||h.cost_price)}</td>
-             <td class="${klass(h.pnl_pct)}">${pct(h.pnl_pct)}</td></tr>`).join("");
+  .map(h => {
+    const sideColor = h.side === 'SHORT' ? 'var(--red)' : 'var(--green)';
+    const entry = h.entry_price ?? h.entry ?? h.cost_price;
+    return `<tr><td>${h.code || h.symbol || '—'} <span style="color:${sideColor};font-size:10px">${h.side || ''}</span></td>
+            <td>${fmt(h.qty)}</td>
+            <td>${entry != null ? '$' + fmt(entry) : '—'}</td>
+            <td class="${klass(h.pl_ratio_pct ?? h.pnl_pct)}">${pct(h.pl_ratio_pct ?? h.pnl_pct)}</td></tr>`;
+  }).join("");
 document.querySelector("#holdingsTable tbody").innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
 
 // Directional baskets

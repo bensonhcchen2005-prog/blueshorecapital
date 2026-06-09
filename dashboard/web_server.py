@@ -972,12 +972,22 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 mv_usd = float(p.get("market_val_usd") or 0)
                 if qty == 0:
                     continue  # only skip flat positions
+                # Compute entry price from cost basis where available
+                cost_local = float(p.get("cost_price_local") or 0)
+                if cost_local <= 0:
+                    # Fallback: derive from current market val + unrealised P&L
+                    mv_local = float(p.get("market_val_local") or mv_usd)
+                    pl_usd = float(p.get("pl_val_usd") or 0)
+                    if abs(qty) > 0:
+                        cost_local = (abs(mv_local) - pl_usd) / abs(qty)
+
                 holdings.append({
                     "code": p.get("code"),
                     "name": p.get("stock_name") or p.get("code"),
                     "market": p.get("market"),
                     "qty": qty,
                     "side": "SHORT" if qty < 0 else "LONG",
+                    "entry_price": round(cost_local, 2) if cost_local > 0 else None,
                     "market_val_usd": round(abs(mv_usd), 2),  # absolute notional
                     "market_val_local": round(abs(float(p.get("market_val_local") or mv_usd)), 2),
                     "pl_val_usd": round(float(p.get("pl_val_usd") or 0), 2),
