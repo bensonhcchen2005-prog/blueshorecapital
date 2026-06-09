@@ -1567,7 +1567,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         }
         try:
             from moomoo import (OpenSecTradeContext, TrdEnv, RET_OK,
-                                SecurityFirm, TrdMarket)
+                                SecurityFirm, TrdMarket, Currency)
         except Exception as e:
             result["reason"] = f"moomoo SDK not importable: {e}"
             self._send_json(result); return
@@ -1597,7 +1597,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 # OpenD 10.7+ disables API unlock_trade — read works without it,
                 # trading requires manual GUI unlock (click 🔒 in OpenD top-right)
                 if True:
-                    ret_a, acc = us.accinfo_query(trd_env=TrdEnv.REAL)
+                    # Default is HKD — force USD for US sub-account
+                    ret_a, acc = us.accinfo_query(trd_env=TrdEnv.REAL, currency=Currency.USD)
                     if ret_a == 0 and acc is not None:
                         result["live_access"] = True
                         result["reason"] = "OK"
