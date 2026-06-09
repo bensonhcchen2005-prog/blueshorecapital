@@ -583,6 +583,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_alerts()
         elif self.path == "/api/costs":
             self._serve_costs()
+        elif self.path == "/api/live":
+            self._serve_live_account()
         elif self.path == "/api/news":
             self._serve_news()
         elif self.path == "/api/baskets":
@@ -1534,6 +1536,132 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             self._send_json({"error": str(e), "theses": [], "count": 0})
+
+    def _serve_live_account(self):
+        """
+        Return LIVE (REAL) Moomoo account data, with graceful failure
+        when access is not yet configured. READ-ONLY — never places orders.
+        """
+        import os
+        from pathlib import Path
+        # Load .env
+        env_file = Path(__file__).parent.parent / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+        pwd = os.environ.get("MOOMOO_TRADE_PASSWORD", "")
+        result = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "live_access": False,
+            "reason": "Unknown",
+            "us": None,
+            "hk": None,
+            "positions": [],
+            "config": {
+                "trade_password_set": bool(pwd),
+                "trade_password_len": len(pwd),
+            },
+        }
+        try:
+            from moomoo import (OpenUSTradeContext, OpenSecTradeContext,
+                                TrdEnv, RET_OK, SecurityFirm)
+        except Exception as e:
+            result["reason"] = f"moomoo SDK not importable: {e}"
+            self._send_json(result); return
+
+        # ── US ────
+        try:
+            us = OpenUSTradeContext(host="127.0.0.1", port=11111)
+            ret_l, acc_list = us.get_acc_list()
+            real_count = 0
+            sim_count = 0
+            if ret_l == 0 and acc_list is not None:
+                real_count = int((acc_list["trd_env"] == "REAL").sum())
+                sim_count = int((acc_list["trd_env"] == "SIMULATE").sum())
+            result["us_account_summary"] = {
+                "real_accounts": real_count,
+                "simulate_accounts": sim_count,
+            }
+            if real_count == 0:
+                result["reason"] = (
+                    "No REAL US account exposed by OpenD. "
+                    "Check that OpenD GUI is signed into the live Moomoo account "
+                    "and the API trade unlock is granted."
+                )
+                us.close()
+            else:
+                # Unlock trade
+                u_ret, u_data = us.unlock_trade(pwd)
+                if u_ret != 0:
+                    result["reason"] = f"Trade unlock failed: {u_data}"
+                    us.close()
+                else:
+                    ret_a, acc = us.accinfo_query(trd_env=TrdEnv.REAL)
+                    if ret_a == 0 and acc is not None:
+                        result["live_access"] = True
+                        result["reason"] = "OK"
+                        result["us"] = {
+                            "total_assets":  float(acc["total_assets"].iloc[0]),
+                            "cash":          float(acc["cash"].iloc[0]),
+                            "market_val":    float(acc["market_val"].iloc[0]),
+                            "frozen_cash":   float(acc.get("frozen_cash", [0]).iloc[0]) if "frozen_cash" in acc.columns else 0,
+                            "power":         float(acc["power"].iloc[0]),
+                        }
+                        ret_p, pos = us.position_list_query(trd_env=TrdEnv.REAL)
+                        if ret_p == 0 and pos is not None:
+                            for _, r in pos.iterrows():
+                                result["positions"].append({
+                                    "code":          r.get("code", ""),
+                                    "name":          str(r.get("stock_name", "")),
+                                    "market":        "US",
+                                    "qty":           float(r.get("qty", 0)),
+                                    "side":          "SHORT" if float(r.get("qty", 0)) < 0 else "LONG",
+                                    "market_val":    float(r.get("market_val", 0)),
+                                    "cost_price":    float(r.get("cost_price", 0)),
+                                    "pl_val":        float(r.get("pl_val", 0)),
+                                    "pl_ratio":      float(r.get("pl_ratio", 0)),
+                                })
+                    else:
+                        result["reason"] = f"accinfo_query(REAL) failed: {acc}"
+                    us.close()
+        except Exception as e:
+            result["reason"] = f"US trade ctx exception: {e}"
+
+        # ── HK ────  (best-effort; doesn't override US result)
+        try:
+            hk = OpenSecTradeContext(host="127.0.0.1", port=11111,
+                                     security_firm=SecurityFirm.FUTUSECURITIES)
+            hk.unlock_trade(pwd)
+            ret_a, acc = hk.accinfo_query(trd_env=TrdEnv.REAL)
+            if ret_a == 0 and acc is not None:
+                result["hk"] = {
+                    "total_assets": float(acc["total_assets"].iloc[0]),
+                    "cash":         float(acc["cash"].iloc[0]),
+                    "market_val":   float(acc["market_val"].iloc[0]),
+                    "currency":     "HKD",
+                }
+                ret_p, pos = hk.position_list_query(trd_env=TrdEnv.REAL)
+                if ret_p == 0 and pos is not None:
+                    for _, r in pos.iterrows():
+                        result["positions"].append({
+                            "code":       r.get("code", ""),
+                            "name":       str(r.get("stock_name", "")),
+                            "market":     "HK",
+                            "qty":        float(r.get("qty", 0)),
+                            "side":       "SHORT" if float(r.get("qty", 0)) < 0 else "LONG",
+                            "market_val": float(r.get("market_val", 0)),
+                            "cost_price": float(r.get("cost_price", 0)),
+                            "pl_val":     float(r.get("pl_val", 0)),
+                            "pl_ratio":   float(r.get("pl_ratio", 0)),
+                        })
+            hk.close()
+        except Exception:
+            pass  # HK live optional
+
+        self._send_json(result)
 
     def _serve_costs(self):
         """Return per-position lifetime trade costs."""

@@ -53,6 +53,27 @@ def sanitise_data(d: dict) -> dict:
     return safe
 
 
+def sanitise_live(live: dict, public: bool = True) -> dict:
+    """
+    For the PUBLIC site we must NOT publish live account dollar amounts.
+    Strip everything except connection status. Local dashboard still
+    sees full data via the API directly.
+    """
+    if not public:
+        return live
+    out = {
+        "generated_at": live.get("generated_at"),
+        "live_access":  live.get("live_access", False),
+        "reason":       "Hidden from public" if live.get("live_access") else live.get("reason"),
+        "us_account_summary": live.get("us_account_summary"),
+        "config":       live.get("config"),
+        "us":           None,
+        "hk":           None,
+        "positions":    [],  # positions hidden from public
+    }
+    return out
+
+
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -158,9 +179,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div style="display:flex;justify-content:flex-end;margin-bottom:14px;align-items:center;gap:10px">
     <span style="font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Market</span>
     <select id="marketFilter" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 12px;font-size:13px;cursor:pointer">
-      <option value="ALL">All markets (US + HK)</option>
-      <option value="US">US only</option>
-      <option value="HK">HK only</option>
+      <option value="ALL">Paper — All markets (US + HK)</option>
+      <option value="US">Paper — US only</option>
+      <option value="HK">Paper — HK only</option>
+      <option value="LIVE" style="font-weight:600">🔴 LIVE Moomoo account</option>
     </select>
   </div>
 
@@ -283,6 +305,7 @@ const ALERTS   = {{ALERTS}};
 const NEWS     = {{NEWS}};
 const BASKETS  = {{BASKETS}};
 const COSTS    = {{COSTS}};
+const LIVE     = {{LIVE}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -295,7 +318,88 @@ const balHistRaw = SNAPSHOT.balance_history || [];
 const portfolios = SNAPSHOT.portfolios || {};
 const PAPER_START = {{PAPER_START}};
 
+function renderLive() {
+  const l = LIVE || {};
+  const banner = document.getElementById('marketBreakdown');
+  if (!l.live_access) {
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi" style="grid-column:1/-1;text-align:center;padding:20px;border:2px dashed var(--amber)">
+        <div style="font-size:14px;color:var(--amber);text-transform:uppercase;font-weight:600">🔴 LIVE Moomoo account — Not connected</div>
+        <div style="font-size:13px;color:var(--dim);margin-top:8px">Status: ${l.reason || 'Unknown'}</div>
+        <div style="font-size:12px;color:var(--dim);margin-top:10px">
+          OpenD sees ${(l.us_account_summary||{}).simulate_accounts||0} SIMULATE accounts but ${(l.us_account_summary||{}).real_accounts||0} REAL accounts.<br>
+          Trade password: ${l.config && l.config.trade_password_set ? '✅ set' : '❌ missing'}.<br>
+          Configure live access in OpenD GUI → Account list, then refresh.
+        </div>
+      </div>`;
+    banner.innerHTML = '';
+    return;
+  }
+
+  // Live access works — show real-time KPIs
+  const usL = l.us || {};
+  const hkL = l.hk || {};
+  const positions = l.positions || [];
+  const longs = positions.filter(p => p.qty > 0);
+  const shorts = positions.filter(p => p.qty < 0);
+  const totalPnl = positions.reduce((a,p) => a + (p.pl_val||0), 0);
+
+  const kpis = [
+    {label:"🔴 LIVE Equity",  value:"$"+fmt(usL.total_assets),   klass:"neu"},
+    {label:"🔴 LIVE Cash",    value:"$"+fmt(usL.cash),           klass:"neu"},
+    {label:"🔴 LIVE Mkt Val", value:"$"+fmt(usL.market_val),     klass:"neu"},
+    {label:"🔴 Buy Power",    value:"$"+fmt(usL.power),          klass:"neu"},
+    {label:"🔴 Unreal P&L",   value:"$"+fmt(totalPnl),           klass:klass(totalPnl)},
+    {label:"🔴 Longs",        value: longs.length,               klass:"neu"},
+    {label:"🔴 Shorts",       value: shorts.length,              klass:"neu"},
+    {label:"🔴 Total pos",    value: positions.length,           klass:"neu"},
+  ];
+  document.getElementById("kpis").innerHTML = kpis.map(k =>
+    `<div class="kpi" style="border-color:var(--red)"><div class="label">${k.label}</div><div class="value ${k.klass}">${k.value}</div></div>`
+  ).join("");
+
+  // Positions table in breakdown panel
+  if (positions.length === 0) {
+    banner.innerHTML = '<section style="background:var(--surface);border:1px solid var(--red);border-radius:8px;padding:16px"><div style="color:var(--dim);font-style:italic">LIVE account connected but holds no positions.</div></section>';
+    return;
+  }
+  let table = `<section style="background:var(--surface);border:1px solid var(--red);border-radius:8px;padding:16px">
+    <h3 style="margin:0 0 12px 0;font-size:14px;color:var(--red)">🔴 LIVE positions (READ-ONLY — no orders placed)</h3>
+    <table style="width:100%;font-size:13px">
+      <thead><tr>
+        <th style="text-align:left;color:var(--dim);font-weight:500;padding:6px">CODE</th>
+        <th style="text-align:left;color:var(--dim);font-weight:500;padding:6px">NAME</th>
+        <th style="text-align:left;color:var(--dim);font-weight:500;padding:6px">SIDE</th>
+        <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px">QTY</th>
+        <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px">COST</th>
+        <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px">MKT VAL</th>
+        <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px">P&amp;L</th>
+        <th style="text-align:right;color:var(--dim);font-weight:500;padding:6px">P&amp;L %</th>
+      </tr></thead><tbody>`;
+  positions.forEach(p => {
+    const sideColor = p.side === 'SHORT' ? 'var(--red)' : 'var(--green)';
+    const ccy = p.market === 'HK' ? 'HK$' : '$';
+    table += `<tr style="border-top:1px solid rgba(48,54,61,0.3)">
+      <td style="padding:6px">${p.code}</td>
+      <td style="padding:6px;color:var(--dim)">${(p.name||'').slice(0,18)}</td>
+      <td style="padding:6px;color:${sideColor};font-weight:600">${p.side}</td>
+      <td style="text-align:right;padding:6px">${fmt(p.qty)}</td>
+      <td style="text-align:right;padding:6px">${ccy}${fmt(p.cost_price)}</td>
+      <td style="text-align:right;padding:6px">${ccy}${fmt(p.market_val)}</td>
+      <td style="text-align:right;padding:6px;color:${klass(p.pl_val)==='pos'?'var(--green)':klass(p.pl_val)==='neg'?'var(--red)':'var(--dim)'}">${ccy}${fmt(p.pl_val)}</td>
+      <td style="text-align:right;padding:6px;color:${klass(p.pl_ratio)==='pos'?'var(--green)':klass(p.pl_ratio)==='neg'?'var(--red)':'var(--dim)'};font-weight:600">${pct(p.pl_ratio)}</td>
+    </tr>`;
+  });
+  table += `</tbody></table>
+    <div style="margin-top:12px;font-size:11px;color:var(--amber)">
+      ⚠️ This panel is read-only. No orders are placed via this dashboard. Live trades require explicit per-trade confirmation in chat.
+    </div>
+  </section>`;
+  banner.innerHTML = table;
+}
+
 function renderKPIs(market) {
+  if (market === 'LIVE') { renderLive(); return; }
   const us = portfolios.US || {};
   const hk = portfolios.HK || {};
   const hkInUSD = hk.total_assets_usd || (hk.total_assets / (hk.fx_hkd_per_usd || 7.78));
@@ -985,10 +1089,11 @@ if (bn) {
 
 
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
-           news: dict, baskets: dict, costs: dict = None,
+           news: dict, baskets: dict, costs: dict = None, live: dict = None,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    # Strip LIVE positions before public render? — no, keep as it's not personally-identifying
     return (HTML_TEMPLATE
             .replace("{{SNAPSHOT}}", json.dumps(snapshot, default=str))
             .replace("{{PIPELINE}}", json.dumps(pipeline, default=str))
@@ -997,6 +1102,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{NEWS}}",     json.dumps(news,     default=str))
             .replace("{{BASKETS}}",  json.dumps(baskets,  default=str))
             .replace("{{COSTS}}",    json.dumps(costs or {"per_code":{},"totals":{}}, default=str))
+            .replace("{{LIVE}}",     json.dumps(live or {"live_access":False,"reason":"not fetched"}, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -1037,13 +1143,19 @@ def main() -> None:
             costs = fetch(f"{args.base}/api/costs")
         except Exception:
             costs = {"per_code": {}, "totals": {}}
+        try:
+            live = fetch(f"{args.base}/api/live")
+        except Exception:
+            live = {"live_access": False, "reason": "fetch failed"}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    html = render(snap, pipe, theses, alerts, news, baskets, costs, args.gh_repo, args.paper_start)
+    # Live data — redact dollar amounts and positions for the public site
+    live_public = sanitise_live(live, public=True)
+    html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
