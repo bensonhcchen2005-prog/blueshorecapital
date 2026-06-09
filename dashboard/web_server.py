@@ -1566,15 +1566,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             },
         }
         try:
-            from moomoo import (OpenUSTradeContext, OpenSecTradeContext,
-                                TrdEnv, RET_OK, SecurityFirm)
+            from moomoo import (OpenSecTradeContext, TrdEnv, RET_OK,
+                                SecurityFirm, TrdMarket)
         except Exception as e:
             result["reason"] = f"moomoo SDK not importable: {e}"
             self._send_json(result); return
 
-        # ── US ────
+        # ── US ──── (using new unified OpenSecTradeContext)
         try:
-            us = OpenUSTradeContext(host="127.0.0.1", port=11111)
+            us = OpenSecTradeContext(filter_trdmarket=TrdMarket.US,
+                                     host="127.0.0.1", port=11111,
+                                     security_firm=SecurityFirm.FUTUINC)
             ret_l, acc_list = us.get_acc_list()
             real_count = 0
             sim_count = 0
@@ -1588,17 +1590,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if real_count == 0:
                 result["reason"] = (
                     "No REAL US account exposed by OpenD. "
-                    "Check that OpenD GUI is signed into the live Moomoo account "
-                    "and the API trade unlock is granted."
+                    "Check that OpenD GUI is signed into the live Moomoo account."
                 )
                 us.close()
             else:
-                # Unlock trade
-                u_ret, u_data = us.unlock_trade(pwd)
-                if u_ret != 0:
-                    result["reason"] = f"Trade unlock failed: {u_data}"
-                    us.close()
-                else:
+                # OpenD 10.7+ disables API unlock_trade — read works without it,
+                # trading requires manual GUI unlock (click 🔒 in OpenD top-right)
+                if True:
                     ret_a, acc = us.accinfo_query(trd_env=TrdEnv.REAL)
                     if ret_a == 0 and acc is not None:
                         result["live_access"] = True
@@ -1632,9 +1630,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         # ── HK ────  (best-effort; doesn't override US result)
         try:
-            hk = OpenSecTradeContext(host="127.0.0.1", port=11111,
-                                     security_firm=SecurityFirm.FUTUSECURITIES)
-            hk.unlock_trade(pwd)
+            hk = OpenSecTradeContext(filter_trdmarket=TrdMarket.HK,
+                                     host="127.0.0.1", port=11111,
+                                     security_firm=SecurityFirm.FUTUINC)
             ret_a, acc = hk.accinfo_query(trd_env=TrdEnv.REAL)
             if ret_a == 0 and acc is not None:
                 result["hk"] = {

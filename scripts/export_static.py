@@ -508,10 +508,14 @@ function renderKPIs(market) {
   if (tbody) tbody.innerHTML = holdRows || "<tr><td colspan=4>No open positions</td></tr>";
 }
 
-// Initial render + dropdown wiring
+// Initial render + dropdown wiring (KPIs + equity curve both swap)
 renderKPIs('ALL');
 const mf = document.getElementById('marketFilter');
-if (mf) mf.addEventListener('change', e => renderKPIs(e.target.value));
+if (mf) mf.addEventListener('change', e => {
+  renderKPIs(e.target.value);
+  // Only swap equity curve for paper markets — LIVE has no historical curve here
+  if (e.target.value !== 'LIVE') renderEquityCurve(e.target.value);
+});
 
 // Equity curve — downsample to ~300 evenly-spaced points so the line scales smoothly
 function downsample(arr, maxPts) {
@@ -522,40 +526,55 @@ function downsample(arr, maxPts) {
   out.push(arr[arr.length-1]);  // always include latest
   return out;
 }
-const balHist = downsample(balHistRaw, 300);
-const labels = balHist.map(p => (p.t || p.timestamp || "").replace("T", " ").slice(0, 16));
-const values = balHist.map(p => p.balance ?? p.equity ?? 0);
-new Chart(document.getElementById("equityChart"), {
-  type:"line",
-  data:{labels, datasets:[{
-    label:"Portfolio value",
-    data:values, borderColor:"#58a6ff", backgroundColor:"rgba(88,166,255,0.1)",
-    fill:true, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2
-  }]},
-  options:{responsive:true, interaction:{mode:"index", intersect:false},
-    plugins:{
-      legend:{display:false},
-      tooltip:{
-        backgroundColor:"#161b22", borderColor:"#30363d", borderWidth:1,
-        titleColor:"#c9d1d9", bodyColor:"#c9d1d9", padding:10,
-        callbacks:{
-          title:(items)=>items[0].label,
-          label:(item)=>{
-            const v = item.parsed.y;
-            const pnl = v - PAPER_START;
-            const pct = (pnl / PAPER_START * 100).toFixed(2);
-            const sign = pnl >= 0 ? "+" : "";
-            return [
-              `Portfolio: $${v.toLocaleString(undefined,{maximumFractionDigits:0})}`,
-              `P&L: ${sign}$${pnl.toLocaleString(undefined,{maximumFractionDigits:0})} (${sign}${pct}%)`
-            ];
+let equityChart = null;
+function renderEquityCurve(market) {
+  const balHist = downsample(balHistRaw, 300);
+  const labels = balHist.map(p => (p.t || p.timestamp || "").replace("T", " ").slice(0, 16));
+  let values, label, ccy;
+  if (market === 'US') {
+    values = balHist.map(p => p.us_balance ?? p.balance ?? 0);
+    label = 'US sub-account (USD)';
+    ccy = '$';
+  } else if (market === 'HK') {
+    values = balHist.map(p => p.hk_balance_hkd ?? 0);
+    label = 'HK sub-account (HKD)';
+    ccy = 'HK$';
+  } else {
+    values = balHist.map(p => p.balance ?? p.equity ?? 0);
+    label = 'Portfolio value (combined USD)';
+    ccy = '$';
+  }
+  if (equityChart) { equityChart.destroy(); }
+  equityChart = new Chart(document.getElementById("equityChart"), {
+    type:"line",
+    data:{labels, datasets:[{
+      label, data:values, borderColor:"#58a6ff", backgroundColor:"rgba(88,166,255,0.1)",
+      fill:true, tension:0.2, pointRadius:0, pointHoverRadius:5, borderWidth:2
+    }]},
+    options:{responsive:true, interaction:{mode:"index", intersect:false},
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:"#161b22", borderColor:"#30363d", borderWidth:1,
+          titleColor:"#c9d1d9", bodyColor:"#c9d1d9", padding:10,
+          callbacks:{
+            title:(items)=>items[0].label,
+            label:(item)=>{
+              const v = item.parsed.y;
+              const startCap = market === 'HK' ? 1000000 : (market === 'US' ? 1000000 : PAPER_START);
+              const pnl = v - startCap;
+              const pctv = (pnl / startCap * 100).toFixed(2);
+              const sign = pnl >= 0 ? "+" : "";
+              return [
+                `${label}: ${ccy}${v.toLocaleString(undefined,{maximumFractionDigits:0})}`,
+                `P&L: ${sign}${ccy}${pnl.toLocaleString(undefined,{maximumFractionDigits:0})} (${sign}${pctv}%)`
+              ];
+            }
           }
-        }
-      }
-    },
-    scales:{x:{ticks:{color:"#8b949e",maxTicksLimit:8},grid:{color:"#30363d"}},
-            y:{ticks:{color:"#8b949e",callback:v=>"$"+v.toLocaleString()},grid:{color:"#30363d"}}}}
-});
+              y:{ticks:{color:"#8b949e",callback:v=>ccy+v.toLocaleString()},grid:{color:"#30363d"}}}}
+  });
+}
+renderEquityCurve('ALL');
 
 // Strategies (API returns 'name', not 'strategy')
 const stratRows = (SNAPSHOT.strategy_breakdown || [])
