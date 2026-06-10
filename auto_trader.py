@@ -1890,14 +1890,14 @@ def run_cycle(
     all_universe = []
     min_minutes_for_entry = 15  # don't open positions within 15 min of close
 
-    if session["hk_open"] and session["hk_minutes_to_close"] > min_minutes_for_entry:
+    # HK scanning DISABLED — focus on US equities (per strategic decision Jun 2026)
+    # Existing HK positions still tracked & exited normally; just no new HK entries.
+    HK_SCAN_ENABLED = os.environ.get("HK_SCAN_ENABLED", "0") == "1"
+    if HK_SCAN_ENABLED and session["hk_open"] and session["hk_minutes_to_close"] > min_minutes_for_entry:
         all_universe += HK_UNIVERSE
-        logger.info(f"HK market open — scanning {len(HK_UNIVERSE)} HK tickers "
-                    f"({session['hk_minutes_to_close']}min to close)")
-    elif not session["hk_open"]:
-        logger.info("HK market closed — skipping HK scan")
+        logger.info(f"HK market open — scanning {len(HK_UNIVERSE)} HK tickers")
     else:
-        logger.info(f"HK closing in {session['hk_minutes_to_close']}min — no new HK entries")
+        logger.info("HK scanning disabled (focus on US equities). Existing HK positions still managed.")
 
     if session["us_open"] and session["us_minutes_to_close"] > min_minutes_for_entry:
         all_universe += US_UNIVERSE + ETF_UNIVERSE

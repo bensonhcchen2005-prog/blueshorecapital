@@ -102,6 +102,10 @@ def evaluate_fundamentals(code: str) -> Tuple[bool, str, Dict]:
 
     # 1. Universe check
     if code.startswith("HK."):
+        # HK additions PAUSED — focus on US equities (per strategic decision).
+        # Override with env HK_FUND_GATE_ENABLED=1 to re-enable.
+        if os.environ.get("HK_FUND_GATE_ENABLED", "0") != "1":
+            return False, "HK additions paused — US-only focus", {}
         if code not in HK_FUND_WHITELIST:
             return False, f"HK whitelist: {code} not approved", {}
         return True, f"HK whitelist: {HK_FUND_WHITELIST[code]['thesis']}", {
