@@ -1028,8 +1028,82 @@ function renderTheses() {
       '<div style="color:var(--dim);font-style:italic;padding:12px">No active theses yet.</div>';
     return;
   }
+
+  // === Portfolio metrics panel ===
+  const longs = theses.filter(t => t.side === 'LONG');
+  const shorts = theses.filter(t => t.side === 'SHORT');
+  const usT = theses.filter(t => (t.code||'').startsWith('US.'));
+  const hkT = theses.filter(t => (t.code||'').startsWith('HK.'));
+  const longMV = longs.reduce((a,t)=>a + ((t.entry_price||0) * (t.qty||0)), 0);
+  const shortMV = shorts.reduce((a,t)=>a + ((t.entry_price||0) * (t.qty||0)), 0);
+  const longBeta = longs.reduce((a,t)=>{
+    const b = (t.quantitative||{}).beta || 1.0;
+    return a + b * ((t.entry_price||0) * (t.qty||0));
+  }, 0);
+  const shortBeta = shorts.reduce((a,t)=>{
+    const b = (t.quantitative||{}).beta || 1.0;
+    return a + b * ((t.entry_price||0) * (t.qty||0));
+  }, 0);
+  const netBeta = longBeta - shortBeta;
+  const avgQ = (() => {
+    const scored = theses.filter(t => (t.quantitative||{}).quality_score != null);
+    if (!scored.length) return null;
+    return scored.reduce((a,t)=>a + (t.quantitative.quality_score||0), 0) / scored.length;
+  })();
+
+  const tileColor = (val, good_low) => good_low
+    ? (val < 0.5 ? 'var(--green)' : val < 1.0 ? 'var(--amber)' : 'var(--red)')
+    : (val > 1.0 ? 'var(--green)' : val > 0.5 ? 'var(--amber)' : 'var(--red)');
+
+  const metricsPanel = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <div style="font-size:14px;font-weight:600">Portfolio metrics</div>
+        <div style="font-size:11px;color:var(--dim)">Hedge-fund style snapshot</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+        <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-radius:4px;padding:8px 12px">
+          <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Positions</div>
+          <div style="font-size:18px;font-weight:600">${theses.length}</div>
+          <div style="font-size:10px;color:var(--dim)">${longs.length}L · ${shorts.length}S · ${usT.length}US · ${hkT.length}HK</div>
+        </div>
+        <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-radius:4px;padding:8px 12px">
+          <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Gross / Net</div>
+          <div style="font-size:18px;font-weight:600">$${fmt(longMV+shortMV)}</div>
+          <div style="font-size:10px;color:var(--dim)">Net: $${fmt(longMV - shortMV)}</div>
+        </div>
+        <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-radius:4px;padding:8px 12px">
+          <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Net Beta</div>
+          <div style="font-size:18px;font-weight:600;color:${Math.abs(netBeta/1000)<0.5?'var(--green)':'var(--amber)'}">${(netBeta>=0?'+':'')}${fmt(netBeta)}</div>
+          <div style="font-size:10px;color:var(--dim)">beta-$ exposure</div>
+        </div>
+        <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-radius:4px;padding:8px 12px">
+          <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Avg Quality</div>
+          <div style="font-size:18px;font-weight:600;color:${avgQ>0.7?'var(--green)':avgQ>0.5?'var(--amber)':'var(--red)'}">${avgQ!=null?(avgQ*100).toFixed(0)+'/100':'—'}</div>
+          <div style="font-size:10px;color:var(--dim)">composite fundamentals</div>
+        </div>
+        <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-radius:4px;padding:8px 12px">
+          <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Sharpe / PF</div>
+          <div style="font-size:18px;font-weight:600">${(SNAPSHOT.stats?.profit_factor||0).toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--dim)">profit factor · ${(SNAPSHOT.stats?.win_rate||0).toFixed(0)}% win rate</div>
+        </div>
+        <div style="background:rgba(88,166,255,0.05);border:1px solid var(--border);border-radius:4px;padding:8px 12px">
+          <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Max DD</div>
+          <div style="font-size:18px;font-weight:600;color:var(--red)">$${fmt(SNAPSHOT.stats?.max_drawdown||0)}</div>
+          <div style="font-size:10px;color:var(--dim)">peak-to-trough</div>
+        </div>
+      </div>
+    </div>`;
+
   theses.sort((a,b) => (b.unrealized_pnl||0) - (a.unrealized_pnl||0));
-  const html = theses.map(t => {
+
+  // Group by market
+  const groups = [
+    {label: '🇺🇸 US Equities', code: 'US', items: theses.filter(t => (t.code||'').startsWith('US.'))},
+    {label: '🇭🇰 HK Equities', code: 'HK', items: theses.filter(t => (t.code||'').startsWith('HK.'))},
+  ];
+
+  const renderRow = (t) => {
     const q = t.quantitative || {};
     const ql = t.qualitative || {};
     const sideColor = t.side === "LONG" ? "var(--green)" : "var(--red)";
@@ -1037,10 +1111,13 @@ function renderTheses() {
     const pnl = t.unrealized_pnl || 0;
     const target = t.target || {};
     const tail = (t.tailwinds || []).join(", ") || "—";
+    const qScore = q.quality_score;
+    const qPill = qScore != null
+      ? `<span style="background:${qScore>=0.7?'rgba(63,185,80,0.15)':qScore>=0.5?'rgba(210,153,34,0.15)':'rgba(248,81,73,0.15)'};color:${qScore>=0.7?'var(--green)':qScore>=0.5?'var(--amber)':'var(--red)'};padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-left:6px">Q ${(qScore*100).toFixed(0)}</span>` : '';
     return `
       <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:8px;padding:0;overflow:hidden">
         <summary style="cursor:pointer;padding:12px 14px;list-style:none;display:flex;align-items:center;gap:14px;background:var(--surface)">
-          <span style="font-weight:600;font-size:14px;min-width:90px">${t.code}</span>
+          <span style="font-weight:600;font-size:14px;min-width:100px">${t.code}${qPill}</span>
           <span style="color:${sideColor};font-weight:600;min-width:50px">${t.side}</span>
           <span style="color:var(--dim);font-size:12px;min-width:90px">${t.sector || "—"}</span>
           <span style="flex:1;color:var(--dim);font-size:12px">${(ql.thesis_summary||"").slice(0,80)}${(ql.thesis_summary||"").length>80?"…":""}</span>
@@ -1085,7 +1162,27 @@ function renderTheses() {
           </div>
         </div>
       </details>`;
-  }).join("");
+  };
+
+  // Build grouped HTML
+  let html = metricsPanel;
+  groups.forEach(g => {
+    if (!g.items.length) return;
+    const groupLong = g.items.filter(t => t.side === 'LONG').length;
+    const groupShort = g.items.filter(t => t.side === 'SHORT').length;
+    const groupPnl = g.items.reduce((a,t)=>a + (t.unrealized_pnl||0), 0);
+    const pnlColor = groupPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    html += `
+      <div style="margin:20px 0 12px 0;display:flex;justify-content:space-between;align-items:baseline;padding:8px 12px;background:rgba(88,166,255,0.08);border-radius:6px;border-left:3px solid var(--blue)">
+        <div style="font-size:14px;font-weight:600">${g.label}</div>
+        <div style="font-size:12px;color:var(--dim)">
+          ${g.items.length} positions · ${groupLong}L · ${groupShort}S
+          · Unreal: <span style="color:${pnlColor};font-weight:600">${groupPnl>=0?'+':''}$${fmt(Math.abs(groupPnl))}</span>
+        </div>
+      </div>`;
+    html += g.items.map(renderRow).join("");
+  });
+
   document.getElementById("thesesList").innerHTML = html;
 }
 renderTheses();
