@@ -23,8 +23,15 @@ import pandas as pd
 from moomoo import (
     RET_OK, TrdSide, OrderType, TrdEnv, TrdMarket,
     SubType, KLType, AuType, SysConfig,
-    OpenQuoteContext, OpenSecTradeContext, OpenUSTradeContext,
+    OpenQuoteContext, OpenSecTradeContext,
 )
+# SDK 10.7+ removed OpenUSTradeContext; use OpenSecTradeContext with
+# filter_trdmarket=TrdMarket.US instead. Provide a compatibility alias
+# so legacy call sites keep working without a mass refactor.
+class OpenUSTradeContext(OpenSecTradeContext):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("filter_trdmarket", TrdMarket.US)
+        super().__init__(*args, **kwargs)
 
 from logging_config.logger import setup_logging
 from dashboard.web_server import start_dashboard, write_system_state
@@ -2219,6 +2226,34 @@ def run_cycle(
             if sig["direction"] == "SHORT" and not sig["code"].startswith("US."):
                 logger.debug(f"Skipping HK short on {sig['code']} — not supported")
                 continue
+
+            # === FUNDAMENTAL GATE ===
+            # Technical signals only decide TIMING; fundamentals decide WHETHER
+            # we can hold the name at all. Rejected here = bot never enters.
+            try:
+                from risk.fundamental_gate import should_enter
+                fund_ok, fund_reason = should_enter(sig["code"], sig["direction"])
+                if not fund_ok:
+                    logger.info(
+                        f"[fund-gate] REJECT {sig['code']} {sig['direction']}: "
+                        f"{fund_reason} (technical signal was {sig['strategy']} "
+                        f"score={sig.get('score',0):.2f})"
+                    )
+                    try:
+                        from data.signal_log import log_event
+                        log_event(
+                            symbol=sig["code"], strategy=sig["strategy"],
+                            direction=sig["direction"], stage="fundamental_gate",
+                            verdict="REJECT", detail=fund_reason,
+                            score=sig.get("score"),
+                        )
+                    except Exception:
+                        pass
+                    continue
+                else:
+                    logger.debug(f"[fund-gate] PASS {sig['code']}: {fund_reason}")
+            except Exception as e:
+                logger.warning(f"[fund-gate] failed for {sig['code']}, allowing: {e}")
 
             # Place order via correct market context
             side = TrdSide.BUY if sig["direction"] == "LONG" else TrdSide.SELL
