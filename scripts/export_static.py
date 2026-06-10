@@ -571,7 +571,13 @@ function renderEquityCurve(market) {
               ];
             }
           }
-              y:{ticks:{color:"#8b949e",callback:v=>ccy+v.toLocaleString()},grid:{color:"#30363d"}}}}
+        }
+      },
+      scales:{
+        x:{ticks:{color:"#8b949e",maxTicksLimit:8}, grid:{color:"#30363d"}},
+        y:{ticks:{color:"#8b949e",callback:v=>ccy+v.toLocaleString()}, grid:{color:"#30363d"}}
+      }
+    }
   });
 }
 renderEquityCurve('ALL');
