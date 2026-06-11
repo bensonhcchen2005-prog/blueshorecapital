@@ -1416,6 +1416,35 @@ def check_exits(
             except Exception:
                 pass
 
+        # === POSITION-CLASS GATE ===
+        # COMPOUNDERS exit ONLY on thesis break, not technical signals.
+        # CATALYST positions respect min_hold_days.
+        # TACTICAL positions exit normally.
+        if should_exit:
+            try:
+                from risk.position_classifier import should_exit as class_should_exit
+                from data.trade_thesis import get_active_theses
+                _theses = get_active_theses()
+                _thesis = _theses.get(code)
+                if _thesis:
+                    pc_exit, pc_reason = class_should_exit(
+                        code=code, thesis=_thesis, side=direction,
+                        current_price=current_price,
+                        technical_signal_exit=True,
+                        thesis_break_detected=False,  # would come from monitor
+                        stop_price=trade.get("stop_loss"),
+                    )
+                    if not pc_exit:
+                        logger.info(
+                            f"[pos-class] HOLD {code}: {pc_reason} "
+                            f"(technical wanted exit_reason={exit_reason})"
+                        )
+                        should_exit = False
+                    else:
+                        logger.info(f"[pos-class] EXIT OK {code}: {pc_reason}")
+            except Exception as e:
+                logger.debug(f"position_classifier check failed: {e}")
+
         if should_exit:
             # Place exit order via correct market context
             exit_side = TrdSide.SELL if direction == "LONG" else TrdSide.BUY

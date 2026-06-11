@@ -585,6 +585,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_costs()
         elif self.path == "/api/live":
             self._serve_live_account()
+        elif self.path == "/api/classifier":
+            self._serve_classifier()
         elif self.path == "/api/news":
             self._serve_news()
         elif self.path == "/api/baskets":
@@ -1661,6 +1663,34 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             pass  # HK live optional
 
         self._send_json(result)
+
+    def _serve_classifier(self):
+        """Return per-position classification (COMPOUNDER / CATALYST / TACTICAL)."""
+        try:
+            from risk.position_classifier import classify_portfolio, EXIT_POLICY
+            from data.trade_thesis import get_active_theses
+            theses = get_active_theses()
+            classes = classify_portfolio(theses)
+            out = {}
+            for code, c in classes.items():
+                out[code] = {
+                    "classification": c.classification,
+                    "quality_score": c.quality_score,
+                    "horizon_days":  c.horizon_days,
+                    "days_held":     c.days_held,
+                    "tax_status":    c.tax_status,
+                    "days_to_long_term": c.days_to_long_term,
+                    "drip_eligible": c.drip_eligible,
+                    "policy":        c.policy,
+                    "reasoning":     c.reasoning,
+                }
+            self._send_json({
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "policy_definitions": EXIT_POLICY,
+                "per_position": out,
+            })
+        except Exception as e:
+            self._send_json({"error": str(e), "per_position": {}})
 
     def _serve_costs(self):
         """Return per-position lifetime trade costs."""
