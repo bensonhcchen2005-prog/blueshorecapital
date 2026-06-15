@@ -587,6 +587,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_live_account()
         elif self.path == "/api/classifier":
             self._serve_classifier()
+        elif self.path == "/api/queue":
+            self._serve_queue()
+        elif self.path == "/api/weekly":
+            self._serve_weekly()
         elif self.path == "/api/news":
             self._serve_news()
         elif self.path == "/api/baskets":
@@ -1663,6 +1667,33 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             pass  # HK live optional
 
         self._send_json(result)
+
+    def _serve_queue(self):
+        """Return all queued orders + status."""
+        try:
+            from risk.order_queue import list_queue
+            queue = list_queue()
+            from collections import Counter
+            counts = Counter(o.get("status","?") for o in queue)
+            self._send_json({
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "orders": queue,
+                "counts": dict(counts),
+            })
+        except Exception as e:
+            self._send_json({"error": str(e), "orders": []})
+
+    def _serve_weekly(self):
+        """Return latest weekly review."""
+        try:
+            from pathlib import Path
+            p = Path(__file__).parent.parent / "logs" / "weekly_review_latest.json"
+            if p.exists():
+                self._send_json(json.loads(p.read_text()))
+            else:
+                self._send_json({"reviews": [], "counts": {}})
+        except Exception as e:
+            self._send_json({"error": str(e), "reviews": []})
 
     def _serve_classifier(self):
         """Return per-position classification (COMPOUNDER / CATALYST / TACTICAL)."""
