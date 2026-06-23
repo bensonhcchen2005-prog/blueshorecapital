@@ -1235,10 +1235,17 @@ function renderLiveHoldings() {
     </div>`;
   const pnlClr = (d.total_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
   const pnlStr = (d.total_pnl >= 0 ? '+' : '') + '$' + fmt(Math.abs(d.total_pnl||0));
+  // Today's combined P&L across all positions
+  const dayPnlTotal = (d.equities||[]).concat(d.etfs||[]).reduce((a,e) => a + (e.day_pnl_dollar||0), 0);
+  const dayPctTotal = d.total_account_value ? (dayPnlTotal / d.total_account_value * 100) : 0;
+  const dayClr = dayPnlTotal >= 0 ? 'var(--green)' : 'var(--red)';
+  const daySym = dayPnlTotal >= 0 ? '+' : '';
+
   document.getElementById('liveKPIs').innerHTML =
     tile('Total Account', '$'+fmt(d.total_account_value), 'var(--blue)') +
+    tile("Today's P&L", `<span style="color:${dayClr}">${daySym}$${fmt(Math.abs(dayPnlTotal))} (${daySym}${dayPctTotal.toFixed(2)}%)</span>`, dayClr) +
+    tile('Total Unrealized P&L', `<span style="color:${pnlClr}">${pnlStr} (${(d.total_pnl_pct||0).toFixed(2)}%)</span>`, pnlClr) +
     tile('Cost Basis',    '$'+fmt(d.total_cost_basis), 'var(--dim)') +
-    tile('Total P&L', `<span style="color:${pnlClr}">${pnlStr} (${(d.total_pnl_pct||0).toFixed(2)}%)</span>`, pnlClr) +
     tile('Equities',  '$'+fmt(d.equity_mv), 'var(--green)') +
     tile('ETFs', '$'+fmt(d.etf_mv), 'var(--amber)') +
     tile('Options Net', '$'+fmt(d.option_mv), 'var(--red)') +
@@ -1277,24 +1284,49 @@ function renderLiveHoldings() {
     'CLOSE':'var(--red)','REVIEW':'var(--amber)','ROLL_OR_CLOSE':'var(--amber)'
   })[r] || 'var(--dim)';
 
+  // Column grid template — used for both header and rows
+  const HOLDINGS_GRID = '60px 130px 110px 110px 95px 105px 95px 80px 100px 110px 90px';
+
+  // Render header (table header row)
+  const renderHoldingHeader = () => `
+    <div style="display:grid;grid-template-columns:${HOLDINGS_GRID};gap:10px;align-items:center;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">
+      <span>Ticker</span>
+      <span>Company</span>
+      <span>Category</span>
+      <span>Position (Sh @ Cost)</span>
+      <span>Price</span>
+      <span>Mkt Val</span>
+      <span>Day % (Stock)</span>
+      <span>Day $ (Pos)</span>
+      <span>Day % (Port)</span>
+      <span>Weight · Unrealized P&L</span>
+      <span>Action</span>
+    </div>`;
+
   const renderHoldingRow = (h) => {
     const pnlClr = (h.unrealized_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
     const pnlSym = (h.unrealized_pnl||0) >= 0 ? '+' : '';
-    const news = (h.latest_news || []).slice(0,1).map(n =>
-      `<div style="font-size:11px;color:var(--dim);margin-top:4px">${n.title}</div>`).join('');
+    const dayClr = (h.day_chg_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const daySym = (h.day_chg_pct||0) >= 0 ? '+' : '';
+    const dayDollarSym = (h.day_pnl_dollar||0) >= 0 ? '+' : '';
+    const dayPortSym = (h.day_pnl_portfolio_pct||0) >= 0 ? '+' : '';
     const earnDate = (h.earnings || {}).next_earnings_date || '—';
     const ent = h.entry_date || '—';
     return `
-      <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--surface)">
-        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:60px 140px 80px 100px 100px 110px 70px 90px 1fr;gap:10px;align-items:center;font-size:13px">
+      <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:4px;background:var(--surface)">
+        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:${HOLDINGS_GRID};gap:10px;align-items:center;font-size:13px">
           <span style="font-weight:600">${h.ticker}</span>
-          <span style="color:var(--dim);font-size:11px">${(h.company||'').slice(0,28)}</span>
+          <span style="color:var(--dim);font-size:11px">${(h.company||'').slice(0,24)}</span>
           <span style="color:var(--dim);font-size:11px">${h.category||''}</span>
-          <span>${fmt(h.shares)} @ $${fmt(h.cost_basis)}</span>
+          <span style="font-size:12px">${fmt(h.shares)} @ $${fmt(h.cost_basis)}</span>
           <span>$${fmt(h.current_price)}</span>
           <span>$${fmt(h.market_val)}</span>
-          <span style="color:${pnlClr}">${(h.portfolio_weight_pct||0).toFixed(1)}%</span>
-          <span style="color:${pnlClr};font-weight:600">${pnlSym}${fmt(Math.abs(h.unrealized_pnl||0))} (${(h.unrealized_pnl_pct||0).toFixed(1)}%)</span>
+          <span style="color:${dayClr};font-weight:600">${daySym}${(h.day_chg_pct||0).toFixed(2)}%</span>
+          <span style="color:${dayClr}">${dayDollarSym}$${fmt(Math.abs(h.day_pnl_dollar||0))}</span>
+          <span style="color:${dayClr};font-size:11px">${dayPortSym}${(h.day_pnl_portfolio_pct||0).toFixed(3)}%</span>
+          <span style="color:${pnlClr};font-weight:600;font-size:12px">
+            ${(h.portfolio_weight_pct||0).toFixed(1)}% · ${pnlSym}$${fmt(Math.abs(h.unrealized_pnl||0))} (${(h.unrealized_pnl_pct||0).toFixed(1)}%)
+          </span>
           <span><span style="background:${recColor(h.recommendation)};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${h.recommendation||''}</span></span>
         </summary>
         <div style="padding:12px;border-top:1px solid var(--border);background:rgba(0,0,0,0.15)">
@@ -1331,21 +1363,34 @@ function renderLiveHoldings() {
   };
 
   document.getElementById('liveEquities').innerHTML =
-    (d.equities||[]).map(renderHoldingRow).join('');
+    renderHoldingHeader() + (d.equities||[]).map(renderHoldingRow).join('');
   document.getElementById('liveETFs').innerHTML =
-    (d.etfs||[]).map(renderHoldingRow).join('');
+    renderHoldingHeader() + (d.etfs||[]).map(renderHoldingRow).join('');
 
-  // Options
-  document.getElementById('liveOptions').innerHTML =
+  // Options — with header
+  const OPT_GRID = '210px 70px 100px 110px 100px 70px 130px 1fr';
+  const optHeader = `
+    <div style="display:grid;grid-template-columns:${OPT_GRID};gap:10px;align-items:center;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">
+      <span>Contract</span>
+      <span>Qty</span>
+      <span>Strike</span>
+      <span>Underlying</span>
+      <span>ITM Value</span>
+      <span>DTE</span>
+      <span>Action</span>
+      <span>Reasoning</span>
+    </div>`;
+  document.getElementById('liveOptions').innerHTML = optHeader +
     (d.options||[]).map(o => `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;display:grid;grid-template-columns:200px 90px 110px 110px 90px 100px 1fr;gap:10px;font-size:13px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:4px;display:grid;grid-template-columns:${OPT_GRID};gap:10px;align-items:center;font-size:13px">
         <span style="font-weight:600">${o.ticker}</span>
         <span>${o.contracts}x</span>
-        <span>Strike $${o.strike}</span>
-        <span>UL $${(o.underlying_px||0).toFixed(2)}</span>
-        <span style="color:${o.intrinsic>o.premium_at_entry*1.5?'var(--red)':'var(--dim)'}">ITM: $${o.intrinsic}</span>
+        <span>$${o.strike}</span>
+        <span>$${(o.underlying_px||0).toFixed(2)}</span>
+        <span style="color:${o.intrinsic>o.premium_at_entry*1.5?'var(--red)':'var(--dim)'}">$${o.intrinsic}</span>
         <span>${o.days_to_exp}d</span>
-        <span><span style="background:${recColor(o.recommendation)};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${o.recommendation}</span> <span style="color:var(--dim);font-size:11px;margin-left:8px">${o.reasoning}</span></span>
+        <span><span style="background:${recColor(o.recommendation)};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${o.recommendation}</span></span>
+        <span style="color:var(--dim);font-size:11px">${o.reasoning}</span>
       </div>`).join('');
 }
 renderLiveHoldings();

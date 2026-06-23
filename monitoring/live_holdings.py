@@ -322,11 +322,23 @@ def run() -> Dict:
     total_cost = sum(e["cost_total"] for e in equities + etfs)
     total_pnl  = (total_equity_mv + total_etf_mv) - total_cost + sum(o["unrealized_pnl"] for o in options)
 
-    # Weights
+    # Weights + day-change dollar impact + portfolio impact
     if total_mv:
         for e in equities + etfs:
             mv = e.get("market_val") or 0
             e["portfolio_weight_pct"] = round(mv / total_mv * 100, 2)
+            # Position's own day P&L in dollars
+            day_chg_pct = e.get("day_chg_pct")
+            if day_chg_pct is not None and mv:
+                # mv reflects current price; yesterday's value ≈ mv / (1 + day_chg_pct/100)
+                prev_mv = mv / (1 + day_chg_pct / 100)
+                day_pnl_dollar = mv - prev_mv
+                e["day_pnl_dollar"] = round(day_pnl_dollar, 2)
+                # Portfolio-level impact = position day P&L / total account value
+                e["day_pnl_portfolio_pct"] = round(day_pnl_dollar / total_mv * 100, 3)
+            else:
+                e["day_pnl_dollar"] = None
+                e["day_pnl_portfolio_pct"] = None
 
     # Top winners/losers
     pos_list = [e for e in equities + etfs if e.get("unrealized_pnl") is not None]
