@@ -593,6 +593,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_weekly()
         elif self.path == "/api/readiness":
             self._serve_readiness()
+        elif self.path == "/api/live_holdings":
+            self._serve_live_holdings()
         elif self.path == "/api/news":
             self._serve_news()
         elif self.path == "/api/baskets":
@@ -1684,6 +1686,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             self._send_json({"error": str(e), "orders": []})
+
+    def _serve_live_holdings(self):
+        """Return enriched live-account holdings."""
+        try:
+            from pathlib import Path
+            p = Path(__file__).parent.parent / "logs" / "live_holdings_enriched.json"
+            if p.exists():
+                self._send_json(json.loads(p.read_text()))
+            else:
+                self._send_json({"error": "no enriched file — run monitoring.live_holdings"})
+        except Exception as e:
+            self._send_json({"error": str(e)})
 
     def _serve_readiness(self):
         """Return live-trading readiness score + decision."""

@@ -168,6 +168,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
     <button data-tab="overview" class="tab-btn active">Overview</button>
+    <button data-tab="liveacct" class="tab-btn" style="color:var(--red);font-weight:600">🔴 Live Account</button>
     <button data-tab="baskets"  class="tab-btn">Baskets</button>
     <button data-tab="theses"   class="tab-btn">Active Theses</button>
     <button data-tab="details"  class="tab-btn">Trade Details</button>
@@ -212,6 +213,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </section>
   </div>
   </div><!-- /tab-overview -->
+
+  <div id="tab-liveacct" class="tab-panel" style="display:none">
+    <section>
+      <h2 style="color:var(--red)">🔴 Live Moomoo Individual Account</h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:14px">
+        Read-only view of actual account positions. Updates on demand or every 15 min.
+        Recommendations are advisory — execute manually in Moomoo app.
+      </div>
+
+      <!-- Account totals -->
+      <div id="liveKPIs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
+
+      <!-- Risk flags -->
+      <div id="liveRiskFlags" style="margin-bottom:18px"></div>
+
+      <!-- Winners/Losers -->
+      <div id="liveTopMovers" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px"></div>
+
+      <!-- Holdings table -->
+      <h3 style="margin:18px 0 8px 0;font-size:14px">Equities</h3>
+      <div id="liveEquities"></div>
+
+      <h3 style="margin:24px 0 8px 0;font-size:14px">ETFs &amp; Hedge</h3>
+      <div id="liveETFs"></div>
+
+      <h3 style="margin:24px 0 8px 0;font-size:14px">Short Options (premium-collected)</h3>
+      <div id="liveOptions"></div>
+    </section>
+  </div>
 
   <div id="tab-baskets" class="tab-panel" style="display:none">
     <section>
@@ -306,6 +336,7 @@ const NEWS     = {{NEWS}};
 const BASKETS  = {{BASKETS}};
 const COSTS    = {{COSTS}};
 const LIVE     = {{LIVE}};
+const LIVE_HOLDINGS = {{LIVE_HOLDINGS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -1187,6 +1218,138 @@ function renderTheses() {
 }
 renderTheses();
 
+// ── Live Holdings tab ──
+function renderLiveHoldings() {
+  const d = LIVE_HOLDINGS || {};
+  if (!d.equities && !d.etfs) {
+    document.getElementById('liveKPIs').innerHTML =
+      '<div style="grid-column:1/-1;padding:20px;border:1px dashed var(--border);text-align:center;color:var(--dim)">Live holdings file not generated yet. Run <code>monitoring.live_holdings</code>.</div>';
+    return;
+  }
+
+  // KPIs
+  const tile = (label, val, color) =>
+    `<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase">${label}</div>
+      <div style="font-size:20px;font-weight:600">${val}</div>
+    </div>`;
+  const pnlClr = (d.total_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlStr = (d.total_pnl >= 0 ? '+' : '') + '$' + fmt(Math.abs(d.total_pnl||0));
+  document.getElementById('liveKPIs').innerHTML =
+    tile('Total Account', '$'+fmt(d.total_account_value), 'var(--blue)') +
+    tile('Cost Basis',    '$'+fmt(d.total_cost_basis), 'var(--dim)') +
+    tile('Total P&L', `<span style="color:${pnlClr}">${pnlStr} (${(d.total_pnl_pct||0).toFixed(2)}%)</span>`, pnlClr) +
+    tile('Equities',  '$'+fmt(d.equity_mv), 'var(--green)') +
+    tile('ETFs', '$'+fmt(d.etf_mv), 'var(--amber)') +
+    tile('Options Net', '$'+fmt(d.option_mv), 'var(--red)') +
+    (d.hedge ? tile('UVXY Hedge', '$'+(d.hedge.current_price||0).toFixed(2) +
+      ` <span style="font-size:11px;color:var(--dim)">(${d.hedge.day_chg_pct>=0?'+':''}${d.hedge.day_chg_pct||0}%)</span>`,
+      'var(--red)') : '');
+
+  // Risk flags
+  if (d.risk_flags && d.risk_flags.length) {
+    document.getElementById('liveRiskFlags').innerHTML =
+      '<div style="background:rgba(210,153,34,0.08);border:1px solid var(--amber);border-radius:6px;padding:12px;font-size:13px">' +
+      '<div style="font-weight:600;margin-bottom:6px;color:var(--amber)">Risk Flags</div>' +
+      d.risk_flags.map(f => `<div style="margin-top:4px">${f}</div>`).join('') +
+      '</div>';
+  } else {
+    document.getElementById('liveRiskFlags').innerHTML = '';
+  }
+
+  // Top winners + losers
+  const moverCard = (label, items, isWin) => `
+    <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${isWin?'var(--green)':'var(--red)'};border-radius:6px;padding:12px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:8px">${label}</div>
+      ${items.map(m => `
+        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(48,54,61,0.3);font-size:13px">
+          <span style="font-weight:600">${m.ticker}</span>
+          <span style="color:${(m.pnl||0)>=0?'var(--green)':'var(--red)'}">$${fmt(Math.abs(m.pnl||0))} (${(m.pnl_pct||0).toFixed(1)}%)</span>
+        </div>`).join('')}
+    </div>`;
+  document.getElementById('liveTopMovers').innerHTML =
+    moverCard('🟢 Top Winners', d.top_winners || [], true) +
+    moverCard('🔴 Top Losers', d.top_losers || [], false);
+
+  // Holdings rows
+  const recColor = (r) => ({
+    'ADD':'var(--green)','HOLD':'var(--blue)','TRIM':'var(--amber)',
+    'CLOSE':'var(--red)','REVIEW':'var(--amber)','ROLL_OR_CLOSE':'var(--amber)'
+  })[r] || 'var(--dim)';
+
+  const renderHoldingRow = (h) => {
+    const pnlClr = (h.unrealized_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const pnlSym = (h.unrealized_pnl||0) >= 0 ? '+' : '';
+    const news = (h.latest_news || []).slice(0,1).map(n =>
+      `<div style="font-size:11px;color:var(--dim);margin-top:4px">${n.title}</div>`).join('');
+    const earnDate = (h.earnings || {}).next_earnings_date || '—';
+    const ent = h.entry_date || '—';
+    return `
+      <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--surface)">
+        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:60px 140px 80px 100px 100px 110px 70px 90px 1fr;gap:10px;align-items:center;font-size:13px">
+          <span style="font-weight:600">${h.ticker}</span>
+          <span style="color:var(--dim);font-size:11px">${(h.company||'').slice(0,28)}</span>
+          <span style="color:var(--dim);font-size:11px">${h.category||''}</span>
+          <span>${fmt(h.shares)} @ $${fmt(h.cost_basis)}</span>
+          <span>$${fmt(h.current_price)}</span>
+          <span>$${fmt(h.market_val)}</span>
+          <span style="color:${pnlClr}">${(h.portfolio_weight_pct||0).toFixed(1)}%</span>
+          <span style="color:${pnlClr};font-weight:600">${pnlSym}${fmt(Math.abs(h.unrealized_pnl||0))} (${(h.unrealized_pnl_pct||0).toFixed(1)}%)</span>
+          <span><span style="background:${recColor(h.recommendation)};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${h.recommendation||''}</span></span>
+        </summary>
+        <div style="padding:12px;border-top:1px solid var(--border);background:rgba(0,0,0,0.15)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Recommendation</div>
+              <div style="font-size:13px;margin-bottom:10px">${h.reasoning||''}</div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Latest News</div>
+              ${(h.latest_news||[]).map(n => `
+                <div style="font-size:12px;margin-top:3px"><span style="color:var(--dim)">[${n.published||'?'}] [${n.provider||''}]</span> ${n.title}</div>`).join('') || '<div style="color:var(--dim);font-size:12px">—</div>'}
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:10px;margin-bottom:4px">Next Earnings</div>
+              <div style="font-size:12px">${earnDate}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">Position</div>
+              <table style="font-size:12px;width:100%">
+                <tr><td style="color:var(--dim)">Entry date</td><td style="text-align:right">${ent}</td></tr>
+                <tr><td style="color:var(--dim)">Day change</td><td style="text-align:right;color:${(h.day_chg_pct||0)>=0?'var(--green)':'var(--red)'}">${(h.day_chg_pct||0).toFixed(2)}%</td></tr>
+                <tr><td style="color:var(--dim)">YTD</td><td style="text-align:right">${(h.ytd_pct!=null?h.ytd_pct.toFixed(1)+'%':'—')}</td></tr>
+                <tr><td style="color:var(--dim)">Cost basis total</td><td style="text-align:right">$${fmt(h.cost_total)}</td></tr>
+              </table>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:10px;margin-bottom:6px">Fundamentals</div>
+              <table style="font-size:12px;width:100%">
+                <tr><td style="color:var(--dim)">Quality</td><td style="text-align:right"><b>${((h.fundamentals||{}).quality_score!=null?((h.fundamentals.quality_score*100).toFixed(0)+'/100'):'—')}</b></td></tr>
+                <tr><td style="color:var(--dim)">Fwd P/E</td><td style="text-align:right">${(h.fundamentals||{}).forward_pe?h.fundamentals.forward_pe.toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Rev growth</td><td style="text-align:right">${(h.fundamentals||{}).rev_growth!=null?((h.fundamentals.rev_growth*100).toFixed(0)+'%'):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Op margin</td><td style="text-align:right">${(h.fundamentals||{}).op_margin!=null?((h.fundamentals.op_margin*100).toFixed(0)+'%'):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Analyst target</td><td style="text-align:right">${(h.fundamentals||{}).analyst_target?'$'+(h.fundamentals.analyst_target.toFixed(0)):'—'}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </details>`;
+  };
+
+  document.getElementById('liveEquities').innerHTML =
+    (d.equities||[]).map(renderHoldingRow).join('');
+  document.getElementById('liveETFs').innerHTML =
+    (d.etfs||[]).map(renderHoldingRow).join('');
+
+  // Options
+  document.getElementById('liveOptions').innerHTML =
+    (d.options||[]).map(o => `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;display:grid;grid-template-columns:200px 90px 110px 110px 90px 100px 1fr;gap:10px;font-size:13px">
+        <span style="font-weight:600">${o.ticker}</span>
+        <span>${o.contracts}x</span>
+        <span>Strike $${o.strike}</span>
+        <span>UL $${(o.underlying_px||0).toFixed(2)}</span>
+        <span style="color:${o.intrinsic>o.premium_at_entry*1.5?'var(--red)':'var(--dim)'}">ITM: $${o.intrinsic}</span>
+        <span>${o.days_to_exp}d</span>
+        <span><span style="background:${recColor(o.recommendation)};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${o.recommendation}</span> <span style="color:var(--dim);font-size:11px;margin-left:8px">${o.reasoning}</span></span>
+      </div>`).join('');
+}
+renderLiveHoldings();
+
 // Funnel
 const f = PIPELINE.funnel || {};
 const stages = ["originated","passed_score","passed_gate","queued","filled"];
@@ -1212,6 +1375,7 @@ if (bn) {
 
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
            news: dict, baskets: dict, costs: dict = None, live: dict = None,
+           live_holdings: dict = None,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1225,6 +1389,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{BASKETS}}",  json.dumps(baskets,  default=str))
             .replace("{{COSTS}}",    json.dumps(costs or {"per_code":{},"totals":{}}, default=str))
             .replace("{{LIVE}}",     json.dumps(live or {"live_access":False,"reason":"not fetched"}, default=str))
+            .replace("{{LIVE_HOLDINGS}}", json.dumps(live_holdings or {}, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -1269,6 +1434,10 @@ def main() -> None:
             live = fetch(f"{args.base}/api/live")
         except Exception:
             live = {"live_access": False, "reason": "fetch failed"}
+        try:
+            live_holdings = fetch(f"{args.base}/api/live_holdings")
+        except Exception:
+            live_holdings = {}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
@@ -1277,7 +1446,7 @@ def main() -> None:
     snap = sanitise_data(snap)
     # Live data — redact dollar amounts and positions for the public site
     live_public = sanitise_live(live, public=True)
-    html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public, args.gh_repo, args.paper_start)
+    html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public, live_holdings, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
