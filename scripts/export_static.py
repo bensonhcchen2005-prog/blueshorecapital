@@ -337,6 +337,7 @@ const BASKETS  = {{BASKETS}};
 const COSTS    = {{COSTS}};
 const LIVE     = {{LIVE}};
 const LIVE_HOLDINGS = {{LIVE_HOLDINGS}};
+const HOLD_ANALYTICS = {{HOLD_ANALYTICS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -1285,23 +1286,31 @@ function renderLiveHoldings() {
   })[r] || 'var(--dim)';
 
   // Column grid template — used for both header and rows
-  const HOLDINGS_GRID = '60px 130px 110px 110px 95px 105px 95px 80px 100px 110px 90px';
+  const HOLDINGS_GRID = '55px 110px 95px 100px 80px 95px 85px 75px 85px 75px 105px 80px';
 
   // Render header (table header row)
   const renderHoldingHeader = () => `
-    <div style="display:grid;grid-template-columns:${HOLDINGS_GRID};gap:10px;align-items:center;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">
+    <div style="display:grid;grid-template-columns:${HOLDINGS_GRID};gap:8px;align-items:center;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:1px solid var(--border);font-weight:600">
       <span>Ticker</span>
       <span>Company</span>
       <span>Category</span>
-      <span>Position (Sh @ Cost)</span>
+      <span>Position</span>
       <span>Price</span>
       <span>Mkt Val</span>
       <span>Day % (Stock)</span>
       <span>Day $ (Pos)</span>
       <span>Day % (Port)</span>
-      <span>Weight · Unrealized P&L</span>
+      <span title="Click to view forward P/E history">Fwd P/E ▼</span>
+      <span>Weight · Unreal P&L</span>
       <span>Action</span>
     </div>`;
+
+  function recColor(rec){
+    return rec==='ADD' ? '#3fb950'
+         : rec==='CLOSE' ? '#f85149'
+         : rec==='TRIM' ? '#d29922'
+         : rec==='REVIEW' ? '#a371f7' : '#58a6ff';
+  }
 
   const renderHoldingRow = (h) => {
     const pnlClr = (h.unrealized_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
@@ -1310,21 +1319,22 @@ function renderLiveHoldings() {
     const daySym = (h.day_chg_pct||0) >= 0 ? '+' : '';
     const dayDollarSym = (h.day_pnl_dollar||0) >= 0 ? '+' : '';
     const dayPortSym = (h.day_pnl_portfolio_pct||0) >= 0 ? '+' : '';
-    const earnDate = (h.earnings || {}).next_earnings_date || '—';
-    const ent = h.entry_date || '—';
+    const an = (HOLD_ANALYTICS && HOLD_ANALYTICS.tickers && HOLD_ANALYTICS.tickers[h.ticker]) || {};
+    const fpe = an.forward_pe || (h.fundamentals||{}).forward_pe;
     return `
       <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:4px;background:var(--surface)">
-        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:${HOLDINGS_GRID};gap:10px;align-items:center;font-size:13px">
+        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:${HOLDINGS_GRID};gap:8px;align-items:center;font-size:13px">
           <span style="font-weight:600">${h.ticker}</span>
-          <span style="color:var(--dim);font-size:11px">${(h.company||'').slice(0,24)}</span>
+          <span style="color:var(--dim);font-size:11px">${(h.company||'').slice(0,20)}</span>
           <span style="color:var(--dim);font-size:11px">${h.category||''}</span>
-          <span style="font-size:12px">${fmt(h.shares)} @ $${fmt(h.cost_basis)}</span>
+          <span style="font-size:11px">${fmt(h.shares)} @ $${fmt(h.cost_basis)}</span>
           <span>$${fmt(h.current_price)}</span>
           <span>$${fmt(h.market_val)}</span>
           <span style="color:${dayClr};font-weight:600">${daySym}${(h.day_chg_pct||0).toFixed(2)}%</span>
           <span style="color:${dayClr}">${dayDollarSym}$${fmt(Math.abs(h.day_pnl_dollar||0))}</span>
           <span style="color:${dayClr};font-size:11px">${dayPortSym}${(h.day_pnl_portfolio_pct||0).toFixed(3)}%</span>
-          <span style="color:${pnlClr};font-weight:600;font-size:12px">
+          <span style="font-size:12px">${fpe ? fpe.toFixed(1) : '—'}</span>
+          <span style="color:${pnlClr};font-weight:600;font-size:11px">
             ${(h.portfolio_weight_pct||0).toFixed(1)}% · ${pnlSym}$${fmt(Math.abs(h.unrealized_pnl||0))} (${(h.unrealized_pnl_pct||0).toFixed(1)}%)
           </span>
           <span><span style="background:${recColor(h.recommendation)};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${h.recommendation||''}</span></span>
@@ -1358,8 +1368,112 @@ function renderLiveHoldings() {
               </table>
             </div>
           </div>
+
+          ${renderAnalyticsPanel(h.ticker)}
         </div>
       </details>`;
+  };
+
+  // Analytics block: Forward P/E history, EPS quarterly, earnings reactions, peers
+  const renderAnalyticsPanel = (ticker) => {
+    const an = (HOLD_ANALYTICS && HOLD_ANALYTICS.tickers && HOLD_ANALYTICS.tickers[ticker]);
+    if (!an) return '';
+
+    // Detailed view (NOK)
+    const detailedView = an.detailed_view
+      ? `<div style="margin-top:14px;padding:12px;background:rgba(88,166,255,0.05);border-left:3px solid var(--blue);border-radius:4px;font-size:12px;line-height:1.5;white-space:pre-wrap">${an.detailed_view}</div>`
+      : '';
+
+    // Forward P/E sparkline
+    const fpeData = an.forward_pe_history || [];
+    const fpeChart = (() => {
+      if (fpeData.length < 3) return '';
+      const vals = fpeData.map(d => d.fpe);
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const range = max - min || 1;
+      const w = 280, h = 60;
+      const pts = fpeData.map((d, i) => {
+        const x = (i / (fpeData.length - 1)) * w;
+        const y = h - ((d.fpe - min) / range) * h;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      return `<svg width="${w}" height="${h+18}" style="margin-top:6px">
+        <polyline points="${pts}" fill="none" stroke="var(--blue)" stroke-width="1.5"/>
+        <text x="0" y="${h+15}" fill="var(--dim)" font-size="9">${fpeData[0].date}</text>
+        <text x="${w-50}" y="${h+15}" fill="var(--dim)" font-size="9">${fpeData[fpeData.length-1].date}</text>
+        <text x="${w-30}" y="10" fill="var(--green)" font-size="9">${max.toFixed(1)}</text>
+        <text x="${w-30}" y="${h-2}" fill="var(--red)" font-size="9">${min.toFixed(1)}</text>
+      </svg>`;
+    })();
+
+    // EPS history
+    const eps = an.earnings_quarterly || [];
+    const epsRows = eps.slice(0, 6).map(e => {
+      const surp = e.surprise_pct;
+      const surpClr = surp == null ? 'var(--dim)' : surp >= 0 ? 'var(--green)' : 'var(--red)';
+      return `<tr><td style="color:var(--dim);font-size:11px">${e.date}</td>
+        <td style="text-align:right">$${(e.eps_reported||0).toFixed(2)}</td>
+        <td style="text-align:right;color:var(--dim);font-size:11px">$${e.eps_estimate?e.eps_estimate.toFixed(2):'—'}</td>
+        <td style="text-align:right;color:${surpClr};font-weight:600">${surp!=null?(surp>=0?'+':'')+surp.toFixed(1)+'%':'—'}</td></tr>`;
+    }).join('');
+    const abnormalities = (an.eps_abnormality_flags||[]).map(f => `<li style="color:var(--amber);font-size:11px">${f}</li>`).join('');
+
+    // Earnings reactions
+    const reactions = an.earnings_reactions || [];
+    const reactRows = reactions.slice(0, 4).map(r => {
+      const post1Clr = (r.post_1d_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const post5Clr = (r.post_5d_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
+      return `<tr><td style="color:var(--dim);font-size:11px">${r.date}</td>
+        <td style="text-align:right;font-size:11px">${r.pre_5d_pct!=null?(r.pre_5d_pct>=0?'+':'')+r.pre_5d_pct.toFixed(1)+'%':'—'}</td>
+        <td style="text-align:right;color:${post1Clr};font-weight:600">${r.post_1d_pct!=null?(r.post_1d_pct>=0?'+':'')+r.post_1d_pct.toFixed(1)+'%':'—'}</td>
+        <td style="text-align:right;color:${post5Clr}">${r.post_5d_pct!=null?(r.post_5d_pct>=0?'+':'')+r.post_5d_pct.toFixed(1)+'%':'—'}</td></tr>`;
+    }).join('');
+
+    // Peer comparison
+    const peers = an.peer_comparison || [];
+    const peerRows = peers.slice(0, 6).map(p => `
+      <tr ${p.is_self?'style="background:rgba(88,166,255,0.08)"':''}>
+        <td style="font-weight:${p.is_self?600:400}">${p.ticker}</td>
+        <td style="text-align:right">${p.forward_pe?p.forward_pe.toFixed(1):'—'}</td>
+        <td style="text-align:right">${p.ps?p.ps.toFixed(1):'—'}</td>
+        <td style="text-align:right">${p.ev_ebitda?p.ev_ebitda.toFixed(1):'—'}</td>
+        <td style="text-align:right">${p.rev_growth?(p.rev_growth*100).toFixed(0)+'%':'—'}</td>
+        <td style="text-align:right">${p.op_margin?(p.op_margin*100).toFixed(0)+'%':'—'}</td>
+      </tr>`).join('');
+    const keyRatio = an.industry_key_ratio || {};
+
+    return `
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Deep analytics</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+          <div>
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Forward P/E (proxy, 1y weekly)</div>
+            ${fpeChart || '<div style="color:var(--dim);font-size:11px">Insufficient data</div>'}
+            <div style="font-size:11px;color:var(--dim);margin-top:6px">Current: <b style="color:var(--text)">${an.forward_pe?an.forward_pe.toFixed(1):'—'}</b> · Analyst tgt: <b style="color:var(--text)">${an.analyst_target?'$'+an.analyst_target.toFixed(0):'—'}</b> (${an.num_analysts||0} analysts)</div>
+
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:4px">Quarterly EPS — Reported vs Estimate</div>
+            <table style="width:100%;font-size:12px">
+              <thead><tr><th style="text-align:left;color:var(--dim);font-weight:500;font-size:10px">Quarter</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">EPS</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Est</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Surp</th></tr></thead>
+              <tbody>${epsRows || '<tr><td colspan=4 style="color:var(--dim);font-size:11px">No data</td></tr>'}</tbody>
+            </table>
+            ${abnormalities ? `<ul style="margin:6px 0 0 0;padding-left:18px">${abnormalities}</ul>` : ''}
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Earnings reactions (pre-5d / post-1d / post-5d)</div>
+            <table style="width:100%;font-size:12px">
+              <thead><tr><th style="text-align:left;color:var(--dim);font-weight:500;font-size:10px">Date</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Pre-5d</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Day-1</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Day-5</th></tr></thead>
+              <tbody>${reactRows || '<tr><td colspan=4 style="color:var(--dim);font-size:11px">No data</td></tr>'}</tbody>
+            </table>
+
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:4px">Peer comparison <span style="text-transform:none">(industry key: <b style="color:var(--text)">${keyRatio.name||'P/E'}</b> — ${keyRatio.definition||''})</span></div>
+            <table style="width:100%;font-size:11px">
+              <thead><tr><th style="text-align:left;color:var(--dim);font-weight:500;font-size:10px">Ticker</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">FwdPE</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">P/S</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">EV/EBITDA</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">RevG</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">OpM</th></tr></thead>
+              <tbody>${peerRows || '<tr><td colspan=6 style="color:var(--dim);font-size:11px">No peers defined</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+        ${detailedView}
+      </div>`;
   };
 
   document.getElementById('liveEquities').innerHTML =
@@ -1420,11 +1534,10 @@ if (bn) {
 
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
            news: dict, baskets: dict, costs: dict = None, live: dict = None,
-           live_holdings: dict = None,
+           live_holdings: dict = None, hold_analytics: dict = None,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    # Strip LIVE positions before public render? — no, keep as it's not personally-identifying
     return (HTML_TEMPLATE
             .replace("{{SNAPSHOT}}", json.dumps(snapshot, default=str))
             .replace("{{PIPELINE}}", json.dumps(pipeline, default=str))
@@ -1435,6 +1548,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{COSTS}}",    json.dumps(costs or {"per_code":{},"totals":{}}, default=str))
             .replace("{{LIVE}}",     json.dumps(live or {"live_access":False,"reason":"not fetched"}, default=str))
             .replace("{{LIVE_HOLDINGS}}", json.dumps(live_holdings or {}, default=str))
+            .replace("{{HOLD_ANALYTICS}}", json.dumps(hold_analytics or {"tickers":{}}, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -1483,15 +1597,19 @@ def main() -> None:
             live_holdings = fetch(f"{args.base}/api/live_holdings")
         except Exception:
             live_holdings = {}
+        try:
+            hold_analytics = fetch(f"{args.base}/api/holding_analytics")
+        except Exception:
+            hold_analytics = {"tickers": {}}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
         sys.exit(1)
 
     snap = sanitise_data(snap)
-    # Live data — redact dollar amounts and positions for the public site
     live_public = sanitise_live(live, public=True)
-    html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public, live_holdings, args.gh_repo, args.paper_start)
+    html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public,
+                  live_holdings, hold_analytics, args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
