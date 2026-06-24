@@ -1345,12 +1345,12 @@ function renderLiveHoldings() {
               ${(h.latest_news||[]).map(n => `
                 <div style="font-size:12px;margin-top:3px"><span style="color:var(--dim)">[${n.published||'?'}] [${n.provider||''}]</span> ${n.title}</div>`).join('') || '<div style="color:var(--dim);font-size:12px">—</div>'}
               <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:10px;margin-bottom:4px">Next Earnings</div>
-              <div style="font-size:12px">${earnDate}</div>
+              <div style="font-size:12px">${(h.earnings||{}).next_earnings_date || '—'}</div>
             </div>
             <div>
               <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">Position</div>
               <table style="font-size:12px;width:100%">
-                <tr><td style="color:var(--dim)">Entry date</td><td style="text-align:right">${ent}</td></tr>
+                <tr><td style="color:var(--dim)">Entry date</td><td style="text-align:right">${h.entry_date || '—'}</td></tr>
                 <tr><td style="color:var(--dim)">Day change</td><td style="text-align:right;color:${(h.day_chg_pct||0)>=0?'var(--green)':'var(--red)'}">${(h.day_chg_pct||0).toFixed(2)}%</td></tr>
                 <tr><td style="color:var(--dim)">YTD</td><td style="text-align:right">${(h.ytd_pct!=null?h.ytd_pct.toFixed(1)+'%':'—')}</td></tr>
                 <tr><td style="color:var(--dim)">Cost basis total</td><td style="text-align:right">$${fmt(h.cost_total)}</td></tr>
