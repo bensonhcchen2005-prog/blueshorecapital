@@ -1220,9 +1220,8 @@ function renderTheses() {
 renderTheses();
 
 // ── Live Holdings tab ──
-// Mutable holders so the auto-refresh can swap data without rebuilding the page
+// Mutable holder so the auto-refresh can swap data without rebuilding the page
 let LIVE_HOLDINGS_MUT = LIVE_HOLDINGS;
-let HOLD_ANALYTICS_MUT = HOLD_ANALYTICS;
 
 function renderLiveHoldings() {
   const d = LIVE_HOLDINGS_MUT || {};
@@ -1290,7 +1289,7 @@ function renderLiveHoldings() {
   })[r] || 'var(--dim)';
 
   // Column grid template — used for both header and rows
-  const HOLDINGS_GRID = '55px 110px 95px 100px 80px 95px 85px 75px 85px 75px 105px 80px';
+  const HOLDINGS_GRID = '60px 120px 100px 110px 85px 100px 90px 80px 90px 120px 85px';
 
   // Render header (table header row)
   const renderHoldingHeader = () => `
@@ -1304,7 +1303,6 @@ function renderLiveHoldings() {
       <span>Day % (Stock)</span>
       <span>Day $ (Pos)</span>
       <span>Day % (Port)</span>
-      <span title="Click to view forward P/E history">Fwd P/E ▼</span>
       <span>Weight · Unreal P&L</span>
       <span>Action</span>
     </div>`;
@@ -1316,8 +1314,6 @@ function renderLiveHoldings() {
     const daySym = (h.day_chg_pct||0) >= 0 ? '+' : '';
     const dayDollarSym = (h.day_pnl_dollar||0) >= 0 ? '+' : '';
     const dayPortSym = (h.day_pnl_portfolio_pct||0) >= 0 ? '+' : '';
-    const an = (HOLD_ANALYTICS_MUT && HOLD_ANALYTICS_MUT.tickers && HOLD_ANALYTICS_MUT.tickers[h.ticker]) || {};
-    const fpe = an.forward_pe || (h.fundamentals||{}).forward_pe;
     return `
       <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:4px;background:var(--surface)">
         <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:${HOLDINGS_GRID};gap:8px;align-items:center;font-size:13px">
@@ -1330,7 +1326,6 @@ function renderLiveHoldings() {
           <span style="color:${dayClr};font-weight:600">${daySym}${(h.day_chg_pct||0).toFixed(2)}%</span>
           <span style="color:${dayClr}">${dayDollarSym}$${fmt(Math.abs(h.day_pnl_dollar||0))}</span>
           <span style="color:${dayClr};font-size:11px">${dayPortSym}${(h.day_pnl_portfolio_pct||0).toFixed(3)}%</span>
-          <span style="font-size:12px">${fpe ? fpe.toFixed(1) : '—'}</span>
           <span style="color:${pnlClr};font-weight:600;font-size:11px">
             ${(h.portfolio_weight_pct||0).toFixed(1)}% · ${pnlSym}$${fmt(Math.abs(h.unrealized_pnl||0))} (${(h.unrealized_pnl_pct||0).toFixed(1)}%)
           </span>
@@ -1365,112 +1360,8 @@ function renderLiveHoldings() {
               </table>
             </div>
           </div>
-
-          ${renderAnalyticsPanel(h.ticker)}
         </div>
       </details>`;
-  };
-
-  // Analytics block: Forward P/E history, EPS quarterly, earnings reactions, peers
-  const renderAnalyticsPanel = (ticker) => {
-    const an = (HOLD_ANALYTICS && HOLD_ANALYTICS.tickers && HOLD_ANALYTICS.tickers[ticker]);
-    if (!an) return '';
-
-    // Detailed view (NOK)
-    const detailedView = an.detailed_view
-      ? `<div style="margin-top:14px;padding:12px;background:rgba(88,166,255,0.05);border-left:3px solid var(--blue);border-radius:4px;font-size:12px;line-height:1.5;white-space:pre-wrap">${an.detailed_view}</div>`
-      : '';
-
-    // Forward P/E sparkline
-    const fpeData = an.forward_pe_history || [];
-    const fpeChart = (() => {
-      if (fpeData.length < 3) return '';
-      const vals = fpeData.map(d => d.fpe);
-      const min = Math.min(...vals), max = Math.max(...vals);
-      const range = max - min || 1;
-      const w = 280, h = 60;
-      const pts = fpeData.map((d, i) => {
-        const x = (i / (fpeData.length - 1)) * w;
-        const y = h - ((d.fpe - min) / range) * h;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      }).join(' ');
-      return `<svg width="${w}" height="${h+18}" style="margin-top:6px">
-        <polyline points="${pts}" fill="none" stroke="var(--blue)" stroke-width="1.5"/>
-        <text x="0" y="${h+15}" fill="var(--dim)" font-size="9">${fpeData[0].date}</text>
-        <text x="${w-50}" y="${h+15}" fill="var(--dim)" font-size="9">${fpeData[fpeData.length-1].date}</text>
-        <text x="${w-30}" y="10" fill="var(--green)" font-size="9">${max.toFixed(1)}</text>
-        <text x="${w-30}" y="${h-2}" fill="var(--red)" font-size="9">${min.toFixed(1)}</text>
-      </svg>`;
-    })();
-
-    // EPS history
-    const eps = an.earnings_quarterly || [];
-    const epsRows = eps.slice(0, 6).map(e => {
-      const surp = e.surprise_pct;
-      const surpClr = surp == null ? 'var(--dim)' : surp >= 0 ? 'var(--green)' : 'var(--red)';
-      return `<tr><td style="color:var(--dim);font-size:11px">${e.date}</td>
-        <td style="text-align:right">$${(e.eps_reported||0).toFixed(2)}</td>
-        <td style="text-align:right;color:var(--dim);font-size:11px">$${e.eps_estimate?e.eps_estimate.toFixed(2):'—'}</td>
-        <td style="text-align:right;color:${surpClr};font-weight:600">${surp!=null?(surp>=0?'+':'')+surp.toFixed(1)+'%':'—'}</td></tr>`;
-    }).join('');
-    const abnormalities = (an.eps_abnormality_flags||[]).map(f => `<li style="color:var(--amber);font-size:11px">${f}</li>`).join('');
-
-    // Earnings reactions
-    const reactions = an.earnings_reactions || [];
-    const reactRows = reactions.slice(0, 4).map(r => {
-      const post1Clr = (r.post_1d_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
-      const post5Clr = (r.post_5d_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
-      return `<tr><td style="color:var(--dim);font-size:11px">${r.date}</td>
-        <td style="text-align:right;font-size:11px">${r.pre_5d_pct!=null?(r.pre_5d_pct>=0?'+':'')+r.pre_5d_pct.toFixed(1)+'%':'—'}</td>
-        <td style="text-align:right;color:${post1Clr};font-weight:600">${r.post_1d_pct!=null?(r.post_1d_pct>=0?'+':'')+r.post_1d_pct.toFixed(1)+'%':'—'}</td>
-        <td style="text-align:right;color:${post5Clr}">${r.post_5d_pct!=null?(r.post_5d_pct>=0?'+':'')+r.post_5d_pct.toFixed(1)+'%':'—'}</td></tr>`;
-    }).join('');
-
-    // Peer comparison
-    const peers = an.peer_comparison || [];
-    const peerRows = peers.slice(0, 6).map(p => `
-      <tr ${p.is_self?'style="background:rgba(88,166,255,0.08)"':''}>
-        <td style="font-weight:${p.is_self?600:400}">${p.ticker}</td>
-        <td style="text-align:right">${p.forward_pe?p.forward_pe.toFixed(1):'—'}</td>
-        <td style="text-align:right">${p.ps?p.ps.toFixed(1):'—'}</td>
-        <td style="text-align:right">${p.ev_ebitda?p.ev_ebitda.toFixed(1):'—'}</td>
-        <td style="text-align:right">${p.rev_growth?(p.rev_growth*100).toFixed(0)+'%':'—'}</td>
-        <td style="text-align:right">${p.op_margin?(p.op_margin*100).toFixed(0)+'%':'—'}</td>
-      </tr>`).join('');
-    const keyRatio = an.industry_key_ratio || {};
-
-    return `
-      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
-        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Deep analytics</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
-          <div>
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Forward P/E (proxy, 1y weekly)</div>
-            ${fpeChart || '<div style="color:var(--dim);font-size:11px">Insufficient data</div>'}
-            <div style="font-size:11px;color:var(--dim);margin-top:6px">Current: <b style="color:var(--text)">${an.forward_pe?an.forward_pe.toFixed(1):'—'}</b> · Analyst tgt: <b style="color:var(--text)">${an.analyst_target?'$'+an.analyst_target.toFixed(0):'—'}</b> (${an.num_analysts||0} analysts)</div>
-
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:4px">Quarterly EPS — Reported vs Estimate</div>
-            <table style="width:100%;font-size:12px">
-              <thead><tr><th style="text-align:left;color:var(--dim);font-weight:500;font-size:10px">Quarter</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">EPS</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Est</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Surp</th></tr></thead>
-              <tbody>${epsRows || '<tr><td colspan=4 style="color:var(--dim);font-size:11px">No data</td></tr>'}</tbody>
-            </table>
-            ${abnormalities ? `<ul style="margin:6px 0 0 0;padding-left:18px">${abnormalities}</ul>` : ''}
-          </div>
-          <div>
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Earnings reactions (pre-5d / post-1d / post-5d)</div>
-            <table style="width:100%;font-size:12px">
-              <thead><tr><th style="text-align:left;color:var(--dim);font-weight:500;font-size:10px">Date</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Pre-5d</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Day-1</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">Day-5</th></tr></thead>
-              <tbody>${reactRows || '<tr><td colspan=4 style="color:var(--dim);font-size:11px">No data</td></tr>'}</tbody>
-            </table>
-
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:4px">Peer comparison <span style="text-transform:none">(industry key: <b style="color:var(--text)">${keyRatio.name||'P/E'}</b> — ${keyRatio.definition||''})</span></div>
-            <table style="width:100%;font-size:11px">
-              <thead><tr><th style="text-align:left;color:var(--dim);font-weight:500;font-size:10px">Ticker</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">FwdPE</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">P/S</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">EV/EBITDA</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">RevG</th><th style="text-align:right;color:var(--dim);font-weight:500;font-size:10px">OpM</th></tr></thead>
-              <tbody>${peerRows || '<tr><td colspan=6 style="color:var(--dim);font-size:11px">No peers defined</td></tr>'}</tbody>
-            </table>
-          </div>
-        </div>
-        ${detailedView}
-      </div>`;
   };
 
   document.getElementById('liveEquities').innerHTML =
@@ -1539,12 +1430,8 @@ renderLiveHoldings();
     isRefreshing = true;
     banner.innerHTML = '🔄 Refreshing…';
     try {
-      const [lh, ha] = await Promise.all([
-        fetch(`${apiBase}/api/live_holdings`).then(r => r.json()).catch(() => null),
-        fetch(`${apiBase}/api/holding_analytics`).then(r => r.json()).catch(() => null),
-      ]);
+      const lh = await fetch(`${apiBase}/api/live_holdings`).then(r => r.json()).catch(() => null);
       if (lh && !lh.error) LIVE_HOLDINGS_MUT = lh;
-      if (ha && !ha.error) HOLD_ANALYTICS_MUT = ha;
       renderLiveHoldings();
       lastRefresh = new Date();
       banner.innerHTML = `🔄 Updated ${lastRefresh.toLocaleTimeString()}`;
