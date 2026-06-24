@@ -1220,8 +1220,12 @@ function renderTheses() {
 renderTheses();
 
 // ── Live Holdings tab ──
+// Mutable holders so the auto-refresh can swap data without rebuilding the page
+let LIVE_HOLDINGS_MUT = LIVE_HOLDINGS;
+let HOLD_ANALYTICS_MUT = HOLD_ANALYTICS;
+
 function renderLiveHoldings() {
-  const d = LIVE_HOLDINGS || {};
+  const d = LIVE_HOLDINGS_MUT || {};
   if (!d.equities && !d.etfs) {
     document.getElementById('liveKPIs').innerHTML =
       '<div style="grid-column:1/-1;padding:20px;border:1px dashed var(--border);text-align:center;color:var(--dim)">Live holdings file not generated yet. Run <code>monitoring.live_holdings</code>.</div>';
@@ -1305,13 +1309,6 @@ function renderLiveHoldings() {
       <span>Action</span>
     </div>`;
 
-  function recColor(rec){
-    return rec==='ADD' ? '#3fb950'
-         : rec==='CLOSE' ? '#f85149'
-         : rec==='TRIM' ? '#d29922'
-         : rec==='REVIEW' ? '#a371f7' : '#58a6ff';
-  }
-
   const renderHoldingRow = (h) => {
     const pnlClr = (h.unrealized_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
     const pnlSym = (h.unrealized_pnl||0) >= 0 ? '+' : '';
@@ -1319,7 +1316,7 @@ function renderLiveHoldings() {
     const daySym = (h.day_chg_pct||0) >= 0 ? '+' : '';
     const dayDollarSym = (h.day_pnl_dollar||0) >= 0 ? '+' : '';
     const dayPortSym = (h.day_pnl_portfolio_pct||0) >= 0 ? '+' : '';
-    const an = (HOLD_ANALYTICS && HOLD_ANALYTICS.tickers && HOLD_ANALYTICS.tickers[h.ticker]) || {};
+    const an = (HOLD_ANALYTICS_MUT && HOLD_ANALYTICS_MUT.tickers && HOLD_ANALYTICS_MUT.tickers[h.ticker]) || {};
     const fpe = an.forward_pe || (h.fundamentals||{}).forward_pe;
     return `
       <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:4px;background:var(--surface)">
@@ -1508,6 +1505,65 @@ function renderLiveHoldings() {
       </div>`).join('');
 }
 renderLiveHoldings();
+
+// ── Auto-refresh (LOCAL dashboard only) ──
+// Fetches /api/live_holdings and /api/holding_analytics every 30s
+// while the user is on the Holdings tab. Disabled on GitHub Pages
+// because it has no backend.
+(function setupAutoRefresh() {
+  const isGitHubPages = location.hostname.endsWith('.github.io');
+  const apiBase = isGitHubPages ? null : location.origin;
+  if (!apiBase) {
+    // On Pages, show a hint about static-only behavior
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;bottom:8px;right:8px;background:rgba(48,54,61,0.95);color:var(--dim);padding:6px 10px;border-radius:4px;font-size:11px;border:1px solid var(--border);z-index:99';
+    banner.innerHTML = '⏸ Static snapshot · refreshes every ~15 min via cron';
+    document.body.appendChild(banner);
+    return;
+  }
+
+  let isRefreshing = false;
+  let lastRefresh = null;
+  const banner = document.createElement('div');
+  banner.id = 'liveRefreshBanner';
+  banner.style.cssText = 'position:fixed;bottom:8px;right:8px;background:rgba(48,54,61,0.95);color:var(--dim);padding:6px 10px;border-radius:4px;font-size:11px;border:1px solid var(--border);z-index:99';
+  banner.innerHTML = '🔄 Live · refreshes every 30s';
+  document.body.appendChild(banner);
+
+  async function refresh() {
+    if (isRefreshing) return;
+    // Don't refresh if user isn't on a relevant tab
+    const activePanel = document.querySelector('.tab-panel:not([style*="display:none"])');
+    const isHoldingsTab = activePanel && activePanel.id === 'tab-liveAccount';
+    if (!isHoldingsTab) return;
+    isRefreshing = true;
+    banner.innerHTML = '🔄 Refreshing…';
+    try {
+      const [lh, ha] = await Promise.all([
+        fetch(`${apiBase}/api/live_holdings`).then(r => r.json()).catch(() => null),
+        fetch(`${apiBase}/api/holding_analytics`).then(r => r.json()).catch(() => null),
+      ]);
+      if (lh && !lh.error) LIVE_HOLDINGS_MUT = lh;
+      if (ha && !ha.error) HOLD_ANALYTICS_MUT = ha;
+      renderLiveHoldings();
+      lastRefresh = new Date();
+      banner.innerHTML = `🔄 Updated ${lastRefresh.toLocaleTimeString()}`;
+    } catch (e) {
+      banner.innerHTML = '⚠ Refresh failed';
+      console.error('refresh failed', e);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
+  setInterval(refresh, 30_000);
+  // Immediate refresh once when the user switches to the Live Account tab
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tab === 'liveAccount') setTimeout(refresh, 200);
+    });
+  });
+})();
 
 // Funnel
 const f = PIPELINE.funnel || {};
