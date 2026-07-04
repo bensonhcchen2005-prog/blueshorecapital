@@ -289,6 +289,77 @@ def enrich_option(o: Dict) -> Dict:
     }
 
 
+def _china_as_equity_rows() -> List[Dict]:
+    """Read china_holdings_enriched.json and reshape into the same
+    schema as equities/etfs so they can render in the Live Account tab
+    using the existing renderHoldingRow function.
+
+    CNY prices are converted to USD for portfolio-wide consistency
+    (using fx_cny_per_usd from the china enriched file).
+    """
+    ch_path = LOG_DIR / "china_holdings_enriched.json"
+    if not ch_path.exists():
+        return []
+    try:
+        ch = json.loads(ch_path.read_text())
+    except Exception:
+        return []
+    fx = ch.get("fx_cny_per_usd", 7.15) or 7.15
+    out = []
+    for p in ch.get("positions", []):
+        px_cny = p.get("current_price_cny")
+        px_usd = (px_cny / fx) if px_cny else None
+        shares = p.get("shares")
+        cost_cny = p.get("cost_basis_cny")
+        cost_usd = (cost_cny / fx) if cost_cny else None
+        mv_usd = (px_usd * shares) if (px_usd and shares) else None
+        pnl_usd = ((px_usd - cost_usd) * shares) if (px_usd and cost_usd and shares) else None
+        pnl_pct = p.get("unrealized_pnl_pct")
+        fund = p.get("fundamentals") or {}
+
+        # Recommendation from China alerts
+        sev = p.get("overall_severity", "GREEN")
+        rec = "REVIEW" if sev == "URGENT" else ("WATCH" if sev == "WATCH" else "HOLD")
+        alerts_txt = "; ".join(a.get("detail", "")[:100] for a in p.get("alerts", [])[:2])
+        reasoning = alerts_txt if alerts_txt else f"China A-share · {p.get('category','')} · sev {sev}"
+
+        out.append({
+            "ticker":              p.get("code"),
+            "company":             p.get("company"),
+            "category":            "🇨🇳 " + (p.get("category") or ""),
+            "bucket":              "china_equity",
+            "shares":              shares,
+            "cost_basis":          cost_usd,   # USD-converted for display parity
+            "cost_total":          round(cost_usd * shares, 2) if (cost_usd and shares) else 0,
+            "entry_date":          None,
+            "current_price":       round(px_usd, 2) if px_usd else None,
+            "day_chg_pct":         p.get("day_chg_pct"),
+            "ytd_pct":             p.get("ytd_pct"),
+            "market_val":          round(mv_usd, 2) if mv_usd else None,
+            "unrealized_pnl":      round(pnl_usd, 2) if pnl_usd else None,
+            "unrealized_pnl_pct":  pnl_pct,
+            "fundamentals": {
+                "market_cap":     (fund.get("market_cap_cny") or 0) / fx if fund.get("market_cap_cny") else None,
+                "forward_pe":     fund.get("forward_pe"),
+                "rev_growth":     fund.get("rev_growth"),
+                "op_margin":      fund.get("op_margin"),
+                "beta":           fund.get("beta"),
+                "quality_score":  None,
+                "analyst_target": fund.get("analyst_target"),
+            },
+            "latest_news":         p.get("latest_news", [])[:3],
+            "earnings":            {"next_earnings_date": None},
+            "recommendation":      rec,
+            "reasoning":           reasoning,
+            # Retain original CNY fields for reference on hover / expand
+            "price_cny":           px_cny,
+            "name_zh":             p.get("name_zh"),
+            "china_severity":      sev,
+            "china_alerts":        p.get("alerts", []),
+        })
+    return out
+
+
 def run() -> Dict:
     if not INPUT_FILE.exists():
         return {"error": "no input file"}
@@ -297,6 +368,7 @@ def run() -> Dict:
     equities = [enrich_position(p, "equity") for p in inp.get("equities", [])]
     etfs     = [enrich_position(p, "etf")    for p in inp.get("etfs", [])]
     options  = [enrich_option(o)             for o in inp.get("options_short_puts", [])]
+    china    = _china_as_equity_rows()
 
     # Hedge (UVXY): pull live and use as portfolio hedge
     hedge_data = None
@@ -313,42 +385,40 @@ def run() -> Dict:
             "note":     h.get("note"),
         }
 
-    # Portfolio aggregates
+    # Portfolio aggregates (include China as equity)
     total_equity_mv = sum(e["market_val"] or 0 for e in equities)
     total_etf_mv    = sum(e["market_val"] or 0 for e in etfs)
     total_opt_mv    = sum(o["market_val"] for o in options)
-    total_mv        = total_equity_mv + total_etf_mv + total_opt_mv
+    total_china_mv  = sum(c["market_val"] or 0 for c in china)
+    total_mv        = total_equity_mv + total_etf_mv + total_opt_mv + total_china_mv
 
-    total_cost = sum(e["cost_total"] for e in equities + etfs)
-    total_pnl  = (total_equity_mv + total_etf_mv) - total_cost + sum(o["unrealized_pnl"] for o in options)
+    total_cost = sum(e["cost_total"] for e in equities + etfs + china)
+    total_pnl  = (total_equity_mv + total_etf_mv + total_china_mv) - total_cost + sum(o["unrealized_pnl"] for o in options)
 
-    # Weights + day-change dollar impact + portfolio impact
+    # Weights + day-change dollar impact + portfolio impact (include china)
     if total_mv:
-        for e in equities + etfs:
+        for e in equities + etfs + china:
             mv = e.get("market_val") or 0
             e["portfolio_weight_pct"] = round(mv / total_mv * 100, 2)
-            # Position's own day P&L in dollars
             day_chg_pct = e.get("day_chg_pct")
             if day_chg_pct is not None and mv:
-                # mv reflects current price; yesterday's value ≈ mv / (1 + day_chg_pct/100)
                 prev_mv = mv / (1 + day_chg_pct / 100)
                 day_pnl_dollar = mv - prev_mv
                 e["day_pnl_dollar"] = round(day_pnl_dollar, 2)
-                # Portfolio-level impact = position day P&L / total account value
                 e["day_pnl_portfolio_pct"] = round(day_pnl_dollar / total_mv * 100, 3)
             else:
                 e["day_pnl_dollar"] = None
                 e["day_pnl_portfolio_pct"] = None
 
-    # Top winners/losers
-    pos_list = [e for e in equities + etfs if e.get("unrealized_pnl") is not None]
+    # Top winners/losers (include china)
+    pos_list = [e for e in equities + etfs + china if e.get("unrealized_pnl") is not None]
     winners = sorted(pos_list, key=lambda x: -x["unrealized_pnl"])[:3]
     losers  = sorted(pos_list, key=lambda x: x["unrealized_pnl"])[:3]
 
-    # Risk flags
+    # Risk flags (include china)
     risk_flags = []
     if total_mv:
-        for e in equities + etfs:
+        for e in equities + etfs + china:
             w = e.get("portfolio_weight_pct", 0)
             if w > 20:
                 risk_flags.append(f"⚠ {e['ticker']}: {w}% weight — concentration risk")
@@ -375,6 +445,8 @@ def run() -> Dict:
         "equities":   equities,
         "etfs":       etfs,
         "options":    options,
+        "china":      china,
+        "china_mv":   round(total_china_mv, 2),
     }
 
 

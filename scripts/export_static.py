@@ -169,7 +169,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
     <button data-tab="overview" class="tab-btn active">Overview</button>
     <button data-tab="liveacct" class="tab-btn" style="color:var(--red);font-weight:600">🔴 Live Account</button>
-    <button data-tab="china"    class="tab-btn" style="color:#f8b400;font-weight:600">🇨🇳 China A-Shares</button>
     <button data-tab="baskets"  class="tab-btn">Baskets</button>
     <button data-tab="theses"   class="tab-btn">Active Theses</button>
     <button data-tab="details"  class="tab-btn">Trade Details</button>
@@ -238,6 +237,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <h3 style="margin:24px 0 8px 0;font-size:14px">ETFs &amp; Hedge</h3>
       <div id="liveETFs"></div>
+
+      <h3 style="margin:24px 0 8px 0;font-size:14px">🇨🇳 China A-Shares (mainland)</h3>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:8px">Shanghai/Shenzhen-listed positions. Prices shown converted to USD at FX in China input file. Click a row to see per-position alerts + news + fundamentals.</div>
+      <div id="liveChina"></div>
 
       <h3 style="margin:24px 0 8px 0;font-size:14px">Short Options (premium-collected)</h3>
       <div id="liveOptions"></div>
@@ -1271,6 +1274,7 @@ function renderLiveHoldings() {
     tile('Cost Basis',    '$'+fmt(d.total_cost_basis), 'var(--dim)') +
     tile('Equities',  '$'+fmt(d.equity_mv), 'var(--green)') +
     tile('ETFs', '$'+fmt(d.etf_mv), 'var(--amber)') +
+    tile('🇨🇳 China', '$'+fmt(d.china_mv||0), '#f8b400') +
     tile('Options Net', '$'+fmt(d.option_mv), 'var(--red)') +
     (d.hedge ? tile('UVXY Hedge', '$'+(d.hedge.current_price||0).toFixed(2) +
       ` <span style="font-size:11px;color:var(--dim)">(${d.hedge.day_chg_pct>=0?'+':''}${d.hedge.day_chg_pct||0}%)</span>`,
@@ -1387,6 +1391,15 @@ function renderLiveHoldings() {
     renderHoldingHeader() + (d.equities||[]).map(renderHoldingRow).join('');
   document.getElementById('liveETFs').innerHTML =
     renderHoldingHeader() + (d.etfs||[]).map(renderHoldingRow).join('');
+  const chinaEl = document.getElementById('liveChina');
+  if (chinaEl) {
+    const chinaRows = (d.china||[]);
+    if (chinaRows.length === 0) {
+      chinaEl.innerHTML = '<div style="color:var(--dim);font-style:italic;padding:12px;font-size:12px">No China A-Share data. Run <code>monitoring.china_holdings</code> then <code>monitoring.live_holdings</code>.</div>';
+    } else {
+      chinaEl.innerHTML = renderHoldingHeader() + chinaRows.map(renderHoldingRow).join('');
+    }
+  }
 
   // Options — with header
   const OPT_GRID = '210px 70px 100px 110px 100px 70px 130px 1fr';
