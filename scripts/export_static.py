@@ -169,6 +169,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
     <button data-tab="overview" class="tab-btn active">Overview</button>
     <button data-tab="liveacct" class="tab-btn" style="color:var(--red);font-weight:600">🔴 Live Account</button>
+    <button data-tab="china"    class="tab-btn" style="color:#f8b400;font-weight:600">🇨🇳 China A-Shares</button>
     <button data-tab="baskets"  class="tab-btn">Baskets</button>
     <button data-tab="theses"   class="tab-btn">Active Theses</button>
     <button data-tab="details"  class="tab-btn">Trade Details</button>
@@ -240,6 +241,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <h3 style="margin:24px 0 8px 0;font-size:14px">Short Options (premium-collected)</h3>
       <div id="liveOptions"></div>
+    </section>
+  </div>
+
+  <div id="tab-china" class="tab-panel" style="display:none">
+    <section>
+      <h2 style="display:flex;align-items:center;gap:12px">
+        🇨🇳 China A-Shares Watchlist
+        <span id="chinaAlertCounts" style="font-size:12px;font-weight:400"></span>
+      </h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Auto-monitors 7 mainland-listed positions on Shanghai/Shenzhen. Fresh news + price moves
+        surface as alerts. Refreshes every 30s on local dashboard.
+      </div>
+      <div id="chinaAlertBanner" style="margin-bottom:14px"></div>
+      <div id="chinaKPIs" class="grid kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px"></div>
+      <div id="chinaHoldings"></div>
     </section>
   </div>
 
@@ -338,6 +355,7 @@ const COSTS    = {{COSTS}};
 const LIVE     = {{LIVE}};
 const LIVE_HOLDINGS = {{LIVE_HOLDINGS}};
 const HOLD_ANALYTICS = {{HOLD_ANALYTICS}};
+const CHINA_HOLDINGS = {{CHINA_HOLDINGS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -1222,6 +1240,7 @@ renderTheses();
 // ── Live Holdings tab ──
 // Mutable holder so the auto-refresh can swap data without rebuilding the page
 let LIVE_HOLDINGS_MUT = LIVE_HOLDINGS;
+let CHINA_HOLDINGS_MUT = CHINA_HOLDINGS;
 
 function renderLiveHoldings() {
   const d = LIVE_HOLDINGS_MUT || {};
@@ -1397,6 +1416,125 @@ function renderLiveHoldings() {
 }
 renderLiveHoldings();
 
+// ── China A-Shares tab renderer ──
+function renderChinaHoldings() {
+  const d = CHINA_HOLDINGS_MUT || {};
+  const kpiEl = document.getElementById('chinaKPIs');
+  if (!d.positions || d.positions.length === 0) {
+    if (kpiEl) kpiEl.innerHTML = '<div style="grid-column:1/-1;padding:20px;border:1px dashed var(--border);text-align:center;color:var(--dim)">No China holdings data. Run <code>monitoring.china_holdings</code>.</div>';
+    return;
+  }
+
+  const counts = d.severity_counts || {};
+  const sev_html = (label, n, color, emoji) => `<span style="background:rgba(0,0,0,0.3);border:1px solid ${color};color:${color};padding:2px 8px;border-radius:10px;font-size:11px;margin-right:6px">${emoji} ${label} ${n}</span>`;
+  const acEl = document.getElementById('chinaAlertCounts');
+  if (acEl) acEl.innerHTML =
+    sev_html('URGENT', counts.URGENT||0, 'var(--red)',   '🔴') +
+    sev_html('WATCH',  counts.WATCH||0,  'var(--amber)', '🟠') +
+    sev_html('NEWS',   counts.NEWS||0,   '#d29922',      '🟡') +
+    sev_html('GREEN',  counts.GREEN||0,  'var(--green)', '🟢');
+
+  const alerts = d.alerts || [];
+  const banner = document.getElementById('chinaAlertBanner');
+  if (banner) {
+    if (alerts.length === 0) {
+      banner.innerHTML = '<div style="padding:10px 14px;background:rgba(63,185,80,0.08);border:1px solid var(--green);color:var(--green);border-radius:6px;font-size:12px">✓ No actionable alerts — all China holdings calm.</div>';
+    } else {
+      const sevColor = {URGENT:'var(--red)', WATCH:'var(--amber)', NEWS:'#d29922'};
+      const sevIcon = {URGENT:'🔴', WATCH:'🟠', NEWS:'🟡'};
+      banner.innerHTML = alerts.slice(0,6).map(a =>
+        `<div style="padding:8px 12px;background:rgba(0,0,0,0.25);border-left:3px solid ${sevColor[a.severity]||'var(--dim)'};border-radius:4px;margin-bottom:5px;font-size:12px">
+          <span style="font-weight:600;color:${sevColor[a.severity]||'var(--dim)'}">${sevIcon[a.severity]||''} ${a.severity}</span>
+          <span style="color:var(--dim);margin-left:6px">${a.type||''}</span>
+          <div style="margin-top:2px">${a.detail}</div>
+        </div>`).join('');
+    }
+  }
+
+  if (kpiEl) {
+    const tile = (label, value, color) => `<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px">
+      <div style="font-size:10px;color:var(--dim);text-transform:uppercase">${label}</div>
+      <div style="font-size:18px;font-weight:600">${value}</div>
+    </div>`;
+    kpiEl.innerHTML =
+      tile('Positions', d.position_count||0, 'var(--blue)') +
+      tile('Total (CNY)', '¥'+fmt(d.total_mv_cny||0), 'var(--amber)') +
+      tile('Total (USD)', '$'+fmt(d.total_mv_usd||0), 'var(--blue)') +
+      tile('FX CNY/USD', (d.fx_cny_per_usd||0).toFixed(2), 'var(--dim)') +
+      tile('Alerts', alerts.length, alerts.length>0?'var(--red)':'var(--green)');
+  }
+
+  const sevBadge = (sev) => {
+    const c = {URGENT:'var(--red)', WATCH:'var(--amber)', NEWS:'#d29922', GREEN:'var(--green)'}[sev] || 'var(--dim)';
+    const em = {URGENT:'🔴', WATCH:'🟠', NEWS:'🟡', GREEN:'🟢'}[sev] || '';
+    return `<span style="background:${c};color:#fff;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600">${em} ${sev}</span>`;
+  };
+
+  const GRID = '60px 130px 130px 100px 90px 85px 75px 75px 85px 110px';
+  const header = `<div style="display:grid;grid-template-columns:${GRID};gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600">
+    <span>Code</span><span>Company</span><span>Category</span><span>Sector</span>
+    <span>Price (¥)</span><span>Day %</span><span>5d %</span><span>YTD %</span>
+    <span>Mkt Cap (¥B)</span><span>Alert</span>
+  </div>`;
+
+  const rows = (d.positions||[]).map(p => {
+    const dayClr = (p.day_chg_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const d5Clr  = (p.d5_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const ytdClr = (p.ytd_pct||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    const mc = (p.fundamentals||{}).market_cap_cny;
+    const sector = (p.fundamentals||{}).sector || '—';
+    return `
+      <details style="border:1px solid var(--border);border-radius:6px;margin-bottom:4px;background:var(--surface)">
+        <summary style="cursor:pointer;padding:10px 12px;list-style:none;display:grid;grid-template-columns:${GRID};gap:8px;align-items:center;font-size:13px">
+          <span style="font-weight:600">${p.code}</span>
+          <span style="font-size:11px">${p.company||''} <span style="color:var(--dim)">${p.name_zh||''}</span></span>
+          <span style="color:var(--dim);font-size:11px">${p.category||''}</span>
+          <span style="color:var(--dim);font-size:11px">${sector}</span>
+          <span>${(p.current_price_cny||0).toFixed(2)}</span>
+          <span style="color:${dayClr};font-weight:600">${(p.day_chg_pct||0)>=0?'+':''}${(p.day_chg_pct||0).toFixed(2)}%</span>
+          <span style="color:${d5Clr};font-size:12px">${(p.d5_pct||0)>=0?'+':''}${(p.d5_pct||0).toFixed(1)}%</span>
+          <span style="color:${ytdClr};font-size:12px">${(p.ytd_pct||0)>=0?'+':''}${(p.ytd_pct||0).toFixed(1)}%</span>
+          <span style="font-size:11px">${mc?'¥'+(mc/1e9).toFixed(1)+'B':'—'}</span>
+          <span>${sevBadge(p.overall_severity||'GREEN')}</span>
+        </summary>
+        <div style="padding:12px;border-top:1px solid var(--border);background:rgba(0,0,0,0.15)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">Alerts on this position</div>
+              ${(p.alerts||[]).length>0
+                ? (p.alerts||[]).map(a => `<div style="font-size:12px;margin-top:4px;padding:6px 10px;background:rgba(0,0,0,0.2);border-left:2px solid ${a.severity==='URGENT'?'var(--red)':'var(--amber)'};border-radius:3px">${sevBadge(a.severity)} ${a.detail}</div>`).join('')
+                : '<div style="color:var(--dim);font-size:12px">None</div>'}
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:12px;margin-bottom:4px">Latest news</div>
+              ${(p.latest_news||[]).length>0
+                ? (p.latest_news||[]).slice(0,5).map(n => {
+                    const sClr = n.sentiment==='urgent'?'var(--red)':n.sentiment==='watch'?'var(--amber)':n.sentiment==='positive'?'var(--green)':'var(--dim)';
+                    return `<div style="font-size:12px;margin-top:3px"><span style="color:${sClr}">●</span> <span style="color:var(--dim);font-size:11px">[${n.published||''}]</span> ${n.title}</div>`;
+                  }).join('')
+                : '<div style="color:var(--dim);font-size:12px">—</div>'}
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">Fundamentals</div>
+              <table style="font-size:12px;width:100%">
+                <tr><td style="color:var(--dim)">Fwd P/E</td><td style="text-align:right">${(p.fundamentals||{}).forward_pe?(p.fundamentals.forward_pe).toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Trailing P/E</td><td style="text-align:right">${(p.fundamentals||{}).trailing_pe?(p.fundamentals.trailing_pe).toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">P/B</td><td style="text-align:right">${(p.fundamentals||{}).pb?(p.fundamentals.pb).toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Div Yield</td><td style="text-align:right">${(p.fundamentals||{}).dividend_yield?((p.fundamentals.dividend_yield*100).toFixed(2)+'%'):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">ROE</td><td style="text-align:right">${(p.fundamentals||{}).roe?((p.fundamentals.roe*100).toFixed(0)+'%'):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Rev Growth</td><td style="text-align:right">${(p.fundamentals||{}).rev_growth?((p.fundamentals.rev_growth*100).toFixed(0)+'%'):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">30d move</td><td style="text-align:right;color:${(p.d30_pct||0)>=0?'var(--green)':'var(--red)'}">${(p.d30_pct||0)>=0?'+':''}${(p.d30_pct||0).toFixed(1)}%</td></tr>
+              </table>
+              <div style="font-size:11px;color:var(--dim);margin-top:8px">Ticker: ${p.yf_ticker}</div>
+            </div>
+          </div>
+        </div>
+      </details>`;
+  }).join('');
+
+  const chEl = document.getElementById('chinaHoldings');
+  if (chEl) chEl.innerHTML = header + rows;
+}
+renderChinaHoldings();
+
 // ── Auto-refresh (LOCAL dashboard only) ──
 // Fetches /api/live_holdings and /api/holding_analytics every 30s
 // while the user is on the Holdings tab. Disabled on GitHub Pages
@@ -1430,9 +1568,14 @@ renderLiveHoldings();
     isRefreshing = true;
     banner.innerHTML = '🔄 Refreshing…';
     try {
-      const lh = await fetch(`${apiBase}/api/live_holdings`).then(r => r.json()).catch(() => null);
+      const [lh, ch] = await Promise.all([
+        fetch(`${apiBase}/api/live_holdings`).then(r => r.json()).catch(() => null),
+        fetch(`${apiBase}/api/china_holdings`).then(r => r.json()).catch(() => null),
+      ]);
       if (lh && !lh.error) LIVE_HOLDINGS_MUT = lh;
+      if (ch && !ch.error) CHINA_HOLDINGS_MUT = ch;
       renderLiveHoldings();
+      renderChinaHoldings();
       lastRefresh = new Date();
       banner.innerHTML = `🔄 Updated ${lastRefresh.toLocaleTimeString()}`;
     } catch (e) {
@@ -1478,6 +1621,7 @@ if (bn) {
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
            news: dict, baskets: dict, costs: dict = None, live: dict = None,
            live_holdings: dict = None, hold_analytics: dict = None,
+           china_holdings: dict = None,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1492,6 +1636,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{LIVE}}",     json.dumps(live or {"live_access":False,"reason":"not fetched"}, default=str))
             .replace("{{LIVE_HOLDINGS}}", json.dumps(live_holdings or {}, default=str))
             .replace("{{HOLD_ANALYTICS}}", json.dumps(hold_analytics or {"tickers":{}}, default=str))
+            .replace("{{CHINA_HOLDINGS}}", json.dumps(china_holdings or {}, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -1544,6 +1689,10 @@ def main() -> None:
             hold_analytics = fetch(f"{args.base}/api/holding_analytics")
         except Exception:
             hold_analytics = {"tickers": {}}
+        try:
+            china_holdings = fetch(f"{args.base}/api/china_holdings")
+        except Exception:
+            china_holdings = {}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
@@ -1552,7 +1701,8 @@ def main() -> None:
     snap = sanitise_data(snap)
     live_public = sanitise_live(live, public=True)
     html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public,
-                  live_holdings, hold_analytics, args.gh_repo, args.paper_start)
+                  live_holdings, hold_analytics, china_holdings,
+                  args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

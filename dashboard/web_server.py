@@ -595,6 +595,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._serve_readiness()
         elif self.path == "/api/live_holdings":
             self._serve_live_holdings()
+        elif self.path == "/api/china_holdings":
+            self._serve_china_holdings()
         elif self.path == "/api/holding_analytics":
             self._serve_holding_analytics()
         elif self.path == "/api/news":
@@ -1698,6 +1700,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._send_json(json.loads(p.read_text()))
             else:
                 self._send_json({"error": "no enriched file — run monitoring.live_holdings"})
+        except Exception as e:
+            self._send_json({"error": str(e)})
+
+    def _serve_china_holdings(self):
+        """Return enriched China A-share holdings + alerts."""
+        try:
+            from pathlib import Path
+            p = Path(__file__).parent.parent / "logs" / "china_holdings_enriched.json"
+            if p.exists():
+                self._send_json(json.loads(p.read_text()))
+            else:
+                self._send_json({"error": "no china enriched file — run monitoring.china_holdings"})
         except Exception as e:
             self._send_json({"error": str(e)})
 
