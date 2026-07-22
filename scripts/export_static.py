@@ -169,6 +169,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div id="tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap">
     <button data-tab="overview" class="tab-btn active">Overview</button>
     <button data-tab="liveacct" class="tab-btn" style="color:var(--red);font-weight:600">🔴 Live Account</button>
+    <button data-tab="earnings" class="tab-btn" style="color:#f8b400;font-weight:600">📊 Earnings</button>
     <button data-tab="baskets"  class="tab-btn">Baskets</button>
     <button data-tab="theses"   class="tab-btn">Active Theses</button>
     <button data-tab="details"  class="tab-btn">Trade Details</button>
@@ -260,6 +261,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="chinaAlertBanner" style="margin-bottom:14px"></div>
       <div id="chinaKPIs" class="grid kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px"></div>
       <div id="chinaHoldings"></div>
+    </section>
+  </div>
+
+  <div id="tab-earnings" class="tab-panel" style="display:none">
+    <section>
+      <h2 style="display:flex;align-items:center;gap:12px">
+        📊 Tech Earnings Analysis
+        <span id="earningsMPACount" style="font-size:12px;font-weight:400"></span>
+      </h2>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        Structured post-earnings analysis for major tech / AI names. <strong>Must-pay-attention</strong>
+        rows surface first (upcoming earnings within 5d, fresh reports within 5d, large surprises, or ±5%+
+        market reactions). Data: yfinance headlines + financials — transcript-level analysis requires paid data.
+      </div>
+      <div id="earningsMustPay"></div>
+      <div id="earningsList"></div>
     </section>
   </div>
 
@@ -359,6 +376,7 @@ const LIVE     = {{LIVE}};
 const LIVE_HOLDINGS = {{LIVE_HOLDINGS}};
 const HOLD_ANALYTICS = {{HOLD_ANALYTICS}};
 const CHINA_HOLDINGS = {{CHINA_HOLDINGS}};
+const EARNINGS = {{EARNINGS}};
 
 const fmt = n => n == null ? "—" : (Math.abs(n) >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toFixed(2));
 const pct = n => n == null ? "—" : (n>=0?"+":"") + n.toFixed(1) + "%";
@@ -1244,6 +1262,7 @@ renderTheses();
 // Mutable holder so the auto-refresh can swap data without rebuilding the page
 let LIVE_HOLDINGS_MUT = LIVE_HOLDINGS;
 let CHINA_HOLDINGS_MUT = CHINA_HOLDINGS;
+let EARNINGS_MUT = EARNINGS;
 
 function renderLiveHoldings() {
   const d = LIVE_HOLDINGS_MUT || {};
@@ -1548,6 +1567,149 @@ function renderChinaHoldings() {
 }
 renderChinaHoldings();
 
+// ── Earnings Analysis tab ──
+function renderEarnings() {
+  const d = EARNINGS_MUT || {};
+  const analyses = d.analyses || {};
+  const mustPay = d.must_pay_attention || [];
+  const order = d.priority_order || Object.keys(analyses);
+
+  const el = document.getElementById('earningsMPACount');
+  if (el) el.innerHTML = `<span style="background:rgba(248,180,0,0.15);color:#f8b400;padding:2px 10px;border-radius:10px;font-size:11px">${mustPay.length} must-pay-attention · ${Object.keys(analyses).length} covered</span>`;
+
+  const priorityColor = {
+    "MATERIAL_SURPRISE": "var(--red)",
+    "MATERIAL_REACTION": "var(--red)",
+    "FRESH":    "var(--amber)",
+    "UPCOMING": "#f8b400",
+    "NORMAL":   "var(--dim)",
+  };
+  const priorityIcon = {
+    "MATERIAL_SURPRISE": "⚡",
+    "MATERIAL_REACTION": "📉📈",
+    "FRESH":    "🆕",
+    "UPCOMING": "📅",
+    "NORMAL":   "✓",
+  };
+
+  const renderCard = (tk) => {
+    const r = analyses[tk] || {};
+    if (r.error) return `<div style="padding:10px;color:var(--red)">${tk}: ${r.error}</div>`;
+    const p = r.priority || "NORMAL";
+    const clr = priorityColor[p] || "var(--dim)";
+    const icon = priorityIcon[p] || "";
+    const le = r.latest_earnings || {};
+    const fr = r.financial_results || {};
+    const ms = r.management_signals || {};
+    const fa = r.forward_assessment || {};
+    const react = r.market_reaction || {};
+
+    const surprise = le.surprise_pct;
+    const surpClr = surprise == null ? 'var(--dim)' : surprise >= 0 ? 'var(--green)' : 'var(--red)';
+    const surpText = surprise == null ? '—' : (surprise>=0?'+':'')+surprise.toFixed(1)+'% surprise';
+    const r1 = react.reaction_1d_pct;
+    const r1Clr = r1 == null ? 'var(--dim)' : r1 >= 0 ? 'var(--green)' : 'var(--red)';
+    const upside = fa.target_upside_pct;
+    const upClr = upside == null ? 'var(--dim)' : upside >= 0 ? 'var(--green)' : 'var(--red)';
+
+    return `
+      <details style="border:1px solid var(--border);border-left:3px solid ${clr};border-radius:6px;margin-bottom:6px;background:var(--surface)">
+        <summary style="cursor:pointer;padding:12px 14px;list-style:none;display:grid;grid-template-columns:60px 200px 120px 100px 110px 130px 130px 1fr;gap:12px;align-items:center;font-size:13px">
+          <span style="font-weight:600">${tk}</span>
+          <span style="font-size:11px;color:var(--dim)">${(r.company||'').slice(0,32)}</span>
+          <span style="font-size:11px;color:${clr};font-weight:600">${icon} ${p.replace(/_/g,' ')}</span>
+          <span style="font-size:11px">${le.date||'—'}</span>
+          <span style="font-size:11px;color:${surpClr};font-weight:600">${surpText}</span>
+          <span style="font-size:11px;color:${r1Clr}">1d: ${r1!=null?(r1>=0?'+':'')+r1.toFixed(1)+'%':'—'}</span>
+          <span style="font-size:11px">Next: ${fa.next_earnings_date||'—'}${fa.days_to_next_earnings!=null?' ('+fa.days_to_next_earnings+'d)':''}</span>
+          <span style="font-size:11px;color:${upClr}">Tgt ${fa.target_upside_pct!=null?(fa.target_upside_pct>=0?'+':'')+fa.target_upside_pct.toFixed(0)+'%':'—'}</span>
+        </summary>
+        <div style="padding:14px;background:rgba(0,0,0,0.15);border-top:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">1. Key Financial Results</div>
+              <table style="width:100%;font-size:12px">
+                <tr><td style="color:var(--dim)">Period</td><td style="text-align:right">${fr.period||'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Revenue</td><td style="text-align:right">${fr.revenue||'—'} ${fr.revenue_yoy_pct!=null?'('+(fr.revenue_yoy_pct>=0?'+':'')+fr.revenue_yoy_pct.toFixed(1)+'% YoY)':''}</td></tr>
+                <tr><td style="color:var(--dim)">EPS reported</td><td style="text-align:right">${le.eps_actual!=null?'$'+le.eps_actual.toFixed(2):'—'} ${le.eps_estimate!=null?'(est $'+le.eps_estimate.toFixed(2)+')':''}</td></tr>
+                <tr><td style="color:var(--dim)">Gross margin</td><td style="text-align:right">${fr.gross_margin_pct!=null?fr.gross_margin_pct+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Op margin</td><td style="text-align:right">${fr.op_margin_pct!=null?fr.op_margin_pct+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Net income</td><td style="text-align:right">${fr.net_income||'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Free cash flow</td><td style="text-align:right">${fr.free_cash_flow||'—'}</td></tr>
+              </table>
+
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:6px">3. Opportunities (from headlines)</div>
+              ${(ms.opportunities_ranked||[]).length>0
+                ? '<ul style="margin:0;padding-left:18px;font-size:12px">'
+                    + (ms.opportunities_ranked||[]).map(o => `<li style="color:var(--green)">${o.theme} <span style="color:var(--dim)">(${o.mentions})</span></li>`).join('')
+                    + '</ul>'
+                : '<div style="color:var(--dim);font-size:12px">—</div>'}
+
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:6px">4. Challenges & Risks (from headlines)</div>
+              ${(ms.challenges_ranked||[]).length>0
+                ? '<ul style="margin:0;padding-left:18px;font-size:12px">'
+                    + (ms.challenges_ranked||[]).map(c => `<li style="color:var(--red)">${c.risk} <span style="color:var(--dim)">(${c.mentions})</span></li>`).join('')
+                    + '</ul>'
+                : '<div style="color:var(--dim);font-size:12px">—</div>'}
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">2. Management Commentary (headlines around earnings)</div>
+              ${(ms.headlines||[]).length>0
+                ? '<div style="font-size:12px">' + (ms.headlines||[]).slice(0,5).map(h => `<div style="margin-top:4px;padding:6px 8px;background:rgba(0,0,0,0.2);border-radius:3px">${h}</div>`).join('') + '</div>'
+                : '<div style="color:var(--dim);font-size:12px">No recent headlines around earnings date</div>'}
+
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:6px">5. Key Takeaways</div>
+              ${(r.key_takeaways||[]).length>0
+                ? '<ul style="margin:0;padding-left:18px;font-size:12px">'
+                    + (r.key_takeaways||[]).map(t => `<li>${t}</li>`).join('')
+                    + '</ul>'
+                : '<div style="color:var(--dim);font-size:12px">—</div>'}
+
+              <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-top:14px;margin-bottom:6px">6. Forward-Looking Assessment</div>
+              <table style="width:100%;font-size:12px">
+                <tr><td style="color:var(--dim)">Next earnings</td><td style="text-align:right">${fa.next_earnings_date||'—'}${fa.days_to_next_earnings!=null?' ('+fa.days_to_next_earnings+'d away)':''}</td></tr>
+                <tr><td style="color:var(--dim)">Current price</td><td style="text-align:right">$${fa.current_price?fa.current_price.toFixed(2):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Analyst target</td><td style="text-align:right">$${fa.analyst_target?fa.analyst_target.toFixed(0):'—'} (${fa.num_analysts||0} analysts)</td></tr>
+                <tr><td style="color:var(--dim)">Target upside</td><td style="text-align:right;color:${upClr};font-weight:600">${fa.target_upside_pct!=null?(fa.target_upside_pct>=0?'+':'')+fa.target_upside_pct.toFixed(0)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Fwd P/E</td><td style="text-align:right">${fa.forward_pe?fa.forward_pe.toFixed(1):'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Post-earn 1d</td><td style="text-align:right;color:${r1Clr}">${r1!=null?(r1>=0?'+':'')+r1.toFixed(1)+'%':'—'}</td></tr>
+                <tr><td style="color:var(--dim)">Post-earn 5d</td><td style="text-align:right">${react.reaction_5d_pct!=null?(react.reaction_5d_pct>=0?'+':'')+react.reaction_5d_pct.toFixed(1)+'%':'—'}</td></tr>
+              </table>
+              <div style="font-size:10px;color:var(--dim);margin-top:10px;font-style:italic">${r.analysis_note||''}</div>
+            </div>
+          </div>
+        </div>
+      </details>`;
+  };
+
+  // Header row
+  const gridHeader = `<div style="display:grid;grid-template-columns:60px 200px 120px 100px 110px 130px 130px 1fr;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;font-weight:600">
+    <span>Ticker</span><span>Company</span><span>Priority</span><span>Last Earn</span>
+    <span>EPS Surprise</span><span>Reaction 1d</span><span>Next Earnings</span><span>Analyst Upside</span>
+  </div>`;
+
+  // Must-pay-attention block first
+  const mpaEl = document.getElementById('earningsMustPay');
+  if (mpaEl) {
+    if (mustPay.length > 0) {
+      mpaEl.innerHTML = `<div style="margin-bottom:14px">
+        <div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:6px">🎯 Must Pay Attention (${mustPay.length})</div>
+        ${gridHeader}
+        ${mustPay.map(renderCard).join('')}
+      </div>`;
+    } else {
+      mpaEl.innerHTML = `<div style="padding:10px 14px;background:rgba(63,185,80,0.08);border:1px solid var(--green);color:var(--green);border-radius:6px;font-size:12px;margin-bottom:14px">✓ No must-pay-attention names right now — no earnings within 5 days, no material surprises or reactions.</div>`;
+    }
+  }
+
+  const listEl = document.getElementById('earningsList');
+  if (listEl) {
+    const others = order.filter(tk => !mustPay.includes(tk));
+    listEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--dim);margin-bottom:6px">All Covered (${others.length})</div>${gridHeader}${others.map(renderCard).join('')}`;
+  }
+}
+renderEarnings();
+
 // ── Auto-refresh (LOCAL dashboard only) ──
 // Fetches /api/live_holdings and /api/holding_analytics every 30s
 // while the user is on the Holdings tab. Disabled on GitHub Pages
@@ -1581,14 +1743,17 @@ renderChinaHoldings();
     isRefreshing = true;
     banner.innerHTML = '🔄 Refreshing…';
     try {
-      const [lh, ch] = await Promise.all([
+      const [lh, ch, ea] = await Promise.all([
         fetch(`${apiBase}/api/live_holdings`).then(r => r.json()).catch(() => null),
         fetch(`${apiBase}/api/china_holdings`).then(r => r.json()).catch(() => null),
+        fetch(`${apiBase}/api/earnings`).then(r => r.json()).catch(() => null),
       ]);
       if (lh && !lh.error) LIVE_HOLDINGS_MUT = lh;
       if (ch && !ch.error) CHINA_HOLDINGS_MUT = ch;
+      if (ea && !ea.error) EARNINGS_MUT = ea;
       renderLiveHoldings();
       renderChinaHoldings();
+      renderEarnings();
       lastRefresh = new Date();
       banner.innerHTML = `🔄 Updated ${lastRefresh.toLocaleTimeString()}`;
     } catch (e) {
@@ -1634,7 +1799,7 @@ if (bn) {
 def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
            news: dict, baskets: dict, costs: dict = None, live: dict = None,
            live_holdings: dict = None, hold_analytics: dict = None,
-           china_holdings: dict = None,
+           china_holdings: dict = None, earnings: dict = None,
            gh_repo: str = "your-username/moomoo-trader",
            paper_start: float = 1_000_000) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1650,6 +1815,7 @@ def render(snapshot: dict, pipeline: dict, theses: dict, alerts: dict,
             .replace("{{LIVE_HOLDINGS}}", json.dumps(live_holdings or {}, default=str))
             .replace("{{HOLD_ANALYTICS}}", json.dumps(hold_analytics or {"tickers":{}}, default=str))
             .replace("{{CHINA_HOLDINGS}}", json.dumps(china_holdings or {}, default=str))
+            .replace("{{EARNINGS}}", json.dumps(earnings or {"analyses":{}}, default=str))
             .replace("{{UPDATED}}", now)
             .replace("{{MODE}}", str(snapshot.get("system", {}).get("mode", "PAPER")))
             .replace("{{GH_REPO}}", gh_repo)
@@ -1706,6 +1872,10 @@ def main() -> None:
             china_holdings = fetch(f"{args.base}/api/china_holdings")
         except Exception:
             china_holdings = {}
+        try:
+            earnings = fetch(f"{args.base}/api/earnings")
+        except Exception:
+            earnings = {"analyses": {}}
     except Exception as e:
         print(f"ERROR: failed to fetch dashboard JSON: {e}", file=sys.stderr)
         print(f"  Is the dashboard running at {args.base}?", file=sys.stderr)
@@ -1714,7 +1884,7 @@ def main() -> None:
     snap = sanitise_data(snap)
     live_public = sanitise_live(live, public=True)
     html = render(snap, pipe, theses, alerts, news, baskets, costs, live_public,
-                  live_holdings, hold_analytics, china_holdings,
+                  live_holdings, hold_analytics, china_holdings, earnings,
                   args.gh_repo, args.paper_start)
 
     out_path = Path(args.out)
